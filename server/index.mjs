@@ -11,9 +11,35 @@ const CACHE_MS = 10 * 60 * 1000;
 const PRODUCT_CACHE_MS = 60 * 60 * 1000;
 const cache = new Map();
 const productCache = new Map();
+const nearbyCache = new Map();
 const requestWindows = new Map();
 const RATE_LIMIT = 60;
 const RATE_WINDOW_MS = 60 * 1000;
+
+// Restrict returned offers to sellers with a clear UAE-market signal.
+// Google Shopping's gl=ae localizes results but does not guarantee every seller is UAE-based.
+const UAE_RETAILER_DOMAINS = new Set([
+  'amazon.ae', 'noon.com', 'carrefouruae.com', 'carrefour.com',
+  'luluhypermarket.com', 'talabat.com', 'deliveroo.ae', 'smiles.ae',
+  'sharafdg.com', 'virginmegastore.ae', 'uae.jashanmal.com',
+  'lifepharmacy.com', 'asteronline.com', 'supercare.ae',
+  'spinneys.com', 'waitrose.ae', 'unioncoop.ae', 'nesto.com',
+  'danubehome.com'
+]);
+const UAE_RETAILER_NAMES = /\\b(noon|amazon\\.ae|carrefour|lulu|talabat|deliveroo|spinneys|waitrose|union coop|nesto|life pharmacy|aster|supercare|sharaf dg|virgin megastore)\\b/i;
+
+function isUaeRetailer(row) {
+  const link = safeHttpUrl(row.product_link || row.link);
+  if (!link) return false;
+  let host = '';
+  try { host = new URL(link).hostname.toLowerCase().replace(/^www\\./, ''); } catch { return false; }
+  const isAeDomain = host.endsWith('.ae') || host === 'ae';
+  const knownDomain = [...UAE_RETAILER_DOMAINS].some((domain) => host === domain || host.endsWith(`.${domain}`));
+  const sellerName = String(row.source || row.merchant || '');
+  const shipping = String(row.delivery || row.shipping || '');
+  const explicitUaeShipping = /\\b(UAE|United Arab Emirates|Abu Dhabi|Dubai|Sharjah)\\b/i.test(shipping);
+  return isAeDomain || knownDomain || (UAE_RETAILER_NAMES.test(sellerName) && explicitUaeShipping);
+}
 
 function safeHttpUrl(value) {
   if (typeof value !== 'string') return null;
@@ -26,7 +52,7 @@ function safeHttpUrl(value) {
 export function normalize(payload) {
   const rows = Array.isArray(payload?.shopping_results) ? payload.shopping_results : [];
   return rows
-    .filter((r) => typeof r.extracted_price === 'number' && r.extracted_price > 0 && safeHttpUrl(r.product_link || r.link))
+    .filter((r) => typeof r.extracted_price === 'number' && r.extracted_price > 0 && isUaeRetailer(r))
     .map((r) => ({
       title: String(r.title ?? ''),
       store: String(r.source ?? 'Google Shopping').replace(/^from\s+/i, ''),
@@ -44,6 +70,7 @@ export function normalize(payload) {
 }
 
 async function serpApi(params) {
+  if (!KEY) throw new Error('SerpApi is not configured on the server.');
   const url = new URL('https://serpapi.com/search.json');
   url.search = new URLSearchParams({ ...params, gl: 'ae', hl: 'en', api_key: KEY });
   const response = await fetch(url);
@@ -55,7 +82,8 @@ async function serpApi(params) {
 async function fetchOffers(q) {
   const hit = cache.get(q);
   if (hit && Date.now() - hit.t < CACHE_MS) return hit.v;
-  const payload = await serpApi({ engine: 'google_shopping', q, google_domain: 'google.ae' });
+  const localizedQuery = /\\b(UAE|United Arab Emirates)\\b/i.test(q) ? q : `${q} UAE`;
+  const payload = await serpApi({ engine: 'google_shopping', q: localizedQuery, google_domain: 'google.ae' });
   const value = { query: q, offers: normalize(payload) };
   cache.set(q, { t: Date.now(), v: value });
   return value;
@@ -93,13 +121,53 @@ async function fetchProduct(productId) {
   return value;
 }
 
+
+async function fetchNearby(lat, lon) {
+  const cacheKey = `${lat.toFixed(3)},${lon.toFixed(3)}`;
+  const hit = nearbyCache.get(cacheKey);
+  if (hit && Date.now() - hit.t < 30 * 60 * 1000) return hit.v;
+  const query = `[out:json][timeout:25];(node(around:5000,${lat},${lon})[shop~"supermarket|convenience|greengrocer|general|grocery|food"];way(around:5000,${lat},${lon})[shop~"supermarket|convenience|greengrocer|general|grocery|food"];relation(around:5000,${lat},${lon})[shop~"supermarket|convenience|greengrocer|general|grocery|food"];);out center tags 80;`;
+  const response = await fetch('https://overpass-api.de/api/interpreter', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+    body: `data=${encodeURIComponent(query)}`,
+    signal: AbortSignal.timeout(28000),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !Array.isArray(payload.elements)) throw new Error('Nearby places provider is temporarily unavailable.');
+  const distanceKm = (a, b) => {
+    const rad = (v) => v * Math.PI / 180;
+    const dLat = rad(a.lat - lat), dLon = rad(a.lon - lon);
+    const x = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat)) * Math.cos(rad(a.lat)) * Math.sin(dLon / 2) ** 2;
+    return 6371 * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+  };
+  const places = payload.elements.map((el) => {
+    const tags = el.tags || {};
+    const point = el.center || el;
+    if (typeof point.lat !== 'number' || typeof point.lon !== 'number') return null;
+    const address = [tags['addr:housenumber'], tags['addr:street'], tags['addr:suburb'], tags['addr:city']].filter(Boolean).join(', ');
+    return {
+      id: `${el.type}-${el.id}`,
+      name: String(tags.name || tags.brand || (tags.shop === 'supermarket' ? 'Supermarket' : 'Grocery shop')),
+      lat: point.lat, lon: point.lon,
+      category: String(tags.shop || 'grocery').replace('_', ' '),
+      address,
+      phone: tags.phone || tags['contact:phone'] || null,
+      website: safeHttpUrl(tags.website || tags['contact:website']),
+      distance: Number(distanceKm(point).toFixed(2)),
+    };
+  }).filter(Boolean).sort((a, b) => a.distance - b.distance).slice(0, 60);
+  const value = { places, source: 'OpenStreetMap contributors', radiusMeters: 5000 };
+  nearbyCache.set(cacheKey, { t: Date.now(), v: value });
+  return value;
+}
+
 function send(res, status, payload) {
   res.statusCode = status;
   res.end(JSON.stringify(payload));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  if (!KEY) { console.error('Set SERPAPI_KEY first (https://serpapi.com).'); process.exit(1); }
   http.createServer(async (req, res) => {
     res.setHeader('access-control-allow-origin', '*');
     res.setHeader('access-control-allow-methods', 'GET, OPTIONS');
@@ -122,12 +190,18 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
         if (q.length < 2) return send(res, 400, { error: 'Search query must contain at least 2 characters.' });
         return send(res, 200, await fetchOffers(q));
       }
+      if (u.pathname === '/nearby') {
+        const lat = Number(u.searchParams.get('lat'));
+        const lon = Number(u.searchParams.get('lon'));
+        if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return send(res, 400, { error: 'Valid latitude and longitude are required.' });
+        return send(res, 200, await fetchNearby(lat, lon));
+      }
       if (u.pathname === '/product') {
         const productId = (u.searchParams.get('product_id') ?? '').trim();
         if (!/^\d{5,30}$/.test(productId)) return send(res, 400, { error: 'A valid Google Shopping product_id is required.' });
         return send(res, 200, await fetchProduct(productId));
       }
-      return send(res, 404, { error: 'Not found. Use /health, /offers?q=term or /product?product_id=ID.' });
+      return send(res, 404, { error: 'Not found. Use /health, /offers?q=term, /product?product_id=ID or /nearby?lat=..&lon=.. .' });
     } catch (error) {
       console.error('Waffer API error:', error.message);
       return send(res, 502, { error: 'The shopping provider could not complete this request. Please try again shortly.' });

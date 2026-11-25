@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Image,
+  Linking,
+  Platform,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -12,6 +14,8 @@ import {
   View,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as Location from 'expo-location';
+import MapView, { Marker, Callout, Region } from 'react-native-maps';
 import { darkColors, lightColors, radius, ThemeColors } from './src/theme';
 import { deals, groceries, menuItems, restaurants, shoes } from './src/data';
 import { Grocery, MenuItem, PlatformPrice, Shoe } from './src/types';
@@ -29,9 +33,12 @@ type Screen =
   | { name: 'shopping' }
   | { name: 'groceries' }
   | { name: 'groceryCompare'; groceryId: string }
+  | { name: 'groceryBasket' }
   | { name: 'category'; title: string };
 
 type BasketLine = { lineId: string; itemId: string; quantity: number; option: string; note: string; unitPrice: number };
+type GroceryBasketLine = { id: string; title: string; store: string; price: number; priceText: string; link: string; image: string | null; quantity: number };
+type NearbyGroceryPlace = { id: string; name: string; lat: number; lon: number; category: string; address: string; phone: string | null; website: string | null; distance?: number };
 
 type ShoeFilters = {
   type: string;
@@ -45,7 +52,7 @@ type ShoeFilters = {
 import { LOCAL_LOGOS } from './src/logos';
 import { fetchLiveOffers, fetchProductDetails, livePricesConfigured, LiveOffer, ProductDetails } from './src/services/offers';
 
-const categories = ['Food', 'Groceries', 'Shopping', 'Electronics', 'Household'];
+const categories = ['Food', 'Groceries', 'Shopping'];
 const shoeTypes = ['Sneakers', 'Sports shoes', 'Casual shoes', 'Formal shoes', 'Sandals'];
 const shoeColors = ['Black', 'White', 'Beige', 'Brown', 'Other'];
 const shoeBrands = ['Nike', 'Adidas', 'Puma', 'New Balance', 'Any brand'];
@@ -666,23 +673,186 @@ function openRestaurantFullMenu(name: string, restaurantId: string) {
   openOffer({ label: `${name} full menu`, webUrl: url });
 }
 
-function GroceriesScreen({ go, back }: { go: (s: Screen) => void; back: () => void }) {
+const GROCERY_CATEGORIES = [
+  { label: 'All', query: 'grocery products' },
+  { label: 'Dairy & eggs', query: 'milk yogurt cheese eggs' },
+  { label: 'Fruits', query: 'fresh fruit' },
+  { label: 'Vegetables', query: 'fresh vegetables' },
+  { label: 'Meat & poultry', query: 'fresh chicken meat' },
+  { label: 'Rice, pasta & grains', query: 'rice pasta grains' },
+  { label: 'Bakery', query: 'bread bakery' },
+  { label: 'Beverages', query: 'water juice beverages' },
+  { label: 'Snacks', query: 'snacks biscuits chips' },
+  { label: 'Frozen', query: 'frozen food' },
+  { label: 'Pantry', query: 'cooking oil canned food spices' },
+];
+
+function GroceriesScreen({ go, back, basket, setBasket }: {
+  go: (s: Screen) => void; back: () => void; basket: GroceryBasketLine[];
+  setBasket: React.Dispatch<React.SetStateAction<GroceryBasketLine[]>>;
+}) {
   const [query, setQuery] = useState('');
-  const results = groceries.filter((g) => `${g.brand} ${g.name} ${g.quantity}`.toLowerCase().includes(query.toLowerCase()));
+  const [category, setCategory] = useState('All');
+  const [offers, setOffers] = useState<LiveOffer[]>([]);
+  const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
+  const [error, setError] = useState('');
+  const searchTerm = query.trim() || (category === 'All' ? '' : GROCERY_CATEGORIES.find((x) => x.label === category)?.query || '');
+  useEffect(() => {
+    if (searchTerm.length < 2) { setOffers([]); setStatus('idle'); setError(''); return; }
+    const controller = new AbortController();
+    setStatus('loading'); setError('');
+    const timer = setTimeout(() => {
+      fetchLiveOffers(`${searchTerm} UAE supermarket`, controller.signal)
+        .then((rows) => { setOffers(rows); setStatus('done'); })
+        .catch((e) => { if (!controller.signal.aborted) { setError(e?.message || 'Unable to retrieve grocery listings.'); setStatus('error'); } });
+    }, 550);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [searchTerm]);
+
+  const add = (offer: LiveOffer) => {
+    const id = `${offer.title}|${offer.store}|${offer.link}`;
+    setBasket((current) => {
+      const existing = current.find((line) => line.id === id);
+      if (existing) return current.map((line) => line.id === id ? { ...line, quantity: line.quantity + 1 } : line);
+      return [...current, { id, title: offer.title, store: offer.store, price: offer.price, priceText: offer.priceText, link: offer.link, image: offer.image, quantity: 1 }];
+    });
+  };
+
   return (
-    <ScrollView contentContainerStyle={styles.page}>
-      <AppHeader title="Grocery comparison" subtitle="Compare equivalent products fairly" onBack={back} />
-      <TextInput style={styles.bigInput} placeholder="Search milk, yogurt, cereal..." value={query} onChangeText={setQuery} />
-      <Text style={styles.helperText}>Try “milk” to demonstrate a 1-litre like-for-like comparison.</Text>
-      {results.map((g) => (
-        <TouchableOpacity key={g.id} style={styles.groceryCard} onPress={() => go({ name: 'groceryCompare', groceryId: g.id })}>
-          <SampleImage label={g.imageLabel} imageUri={g.imageUri} fallbackIcon={g.fallbackIcon} compact />
-          <View style={{ flex: 1 }}><Text style={styles.groceryName}>{g.brand} {g.name}</Text><Text style={styles.groceryQty}>{g.quantity}</Text><Text style={styles.compareHint}>{g.prices.length} stores available in demo</Text></View>
-          <Text style={styles.chevron}>›</Text>
+    <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+      <AppHeader title="Groceries" subtitle="Compare UAE supermarket listings" onBack={back} />
+      <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+        <TextInput style={[styles.bigInput, { flex: 1, marginBottom: 0 }]} placeholder="Search milk, rice, eggs, apples…" value={query} onChangeText={(v) => { setQuery(v); if (v.trim()) setCategory('All'); }} returnKeyType="search" />
+        <TouchableOpacity style={[styles.primaryButton, { paddingHorizontal: 14, marginTop: 0 }]} onPress={() => go({ name: 'groceryBasket' })}>
+          <Text style={styles.primaryButtonText}>Basket ({basket.reduce((n, x) => n + x.quantity, 0)})</Text>
         </TouchableOpacity>
-      ))}
+      </View>
+      <View style={styles.notice}><Text style={styles.noticeText}>LIVE UAE GROCERY SEARCH · Search a generic item to compare available brands and retailer listings. Prices are sorted from lowest to highest.</Text></View>
+      <Text style={styles.sectionTitle}>Browse categories</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }}>
+        {GROCERY_CATEGORIES.map((c) => <Pill key={c.label} text={c.label} selected={category === c.label} onPress={() => { setCategory(c.label); setQuery(''); if (c.label === 'All') { setOffers([]); setStatus('idle'); } }} />)}
+      </ScrollView>
+      {searchTerm.length < 2 ? (
+        <View style={styles.empty}><Text style={styles.emptyTitle}>Find your groceries</Text><Text style={styles.emptyText}>Search for a product or choose a category. For example, searching “milk” can return different brands and package sizes from UAE retailers.</Text></View>
+      ) : status === 'loading' ? <View style={styles.empty}><Text style={styles.emptyTitle}>Searching UAE supermarkets…</Text><Text style={styles.emptyText}>Retrieving listings and sorting by listed item price.</Text></View>
+      : status === 'error' ? <View style={styles.notice}><Text style={styles.noticeText}>Could not load live grocery listings: {error}. Check your connection and try again.</Text></View>
+      : offers.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>No matching listings found</Text><Text style={styles.emptyText}>Try a broader product name or another category.</Text></View>
+      : <View style={{ gap: 12 }}>
+        <SectionTitle title={`Results for “${searchTerm}”`} action={`${offers.length} listings · lowest first`} />
+        {offers.map((offer, index) => (
+          <View key={`${offer.link}-${index}`} style={styles.groceryCard}>
+            <SampleImage label={offer.title} imageUri={offer.image || undefined} fallbackIcon="🛒" compact />
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={styles.groceryName}>{offer.title}</Text>
+              <Text style={styles.groceryQty}>{offer.store}</Text>
+              <Text style={{ color: activeColors.green, fontWeight: '900' }}>{offer.priceText}</Text>
+              <Text style={styles.sampleTiny}>Provider listing · price may change</Text>
+              {offer.delivery ? <Text style={styles.helperText}>Delivery shown: {offer.delivery}</Text> : <Text style={styles.helperText}>Delivery/service fees not included</Text>}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                <TouchableOpacity style={styles.smallAction} onPress={() => openOffer({ label: offer.title, webUrl: offer.link })}><Text style={styles.smallActionText}>TAKE ME TO STORE ↗</Text></TouchableOpacity>
+                <TouchableOpacity style={styles.smallAction} onPress={() => add(offer)}><Text style={styles.smallActionText}>＋ ADD TO BASKET</Text></TouchableOpacity>
+              </View>
+            </View>
+            {index === 0 && <View style={styles.bestBadge}><Text style={styles.bestBadgeText}>LOWEST</Text></View>}
+          </View>
+        ))}
+      </View>}
+      <NearbyGroceryMap />
+      <Text style={styles.disclaimer}>Prices are provider-returned listing prices, not guaranteed checkout prices. Delivery and service fees may apply and are excluded from the item subtotal unless separately verified. Product availability and retailer links can change.</Text>
     </ScrollView>
   );
+}
+
+function NearbyGroceryMap() {
+  const [permission, setPermission] = useState<'pending' | 'granted' | 'denied'>('pending');
+  const [region, setRegion] = useState<Region | null>(null);
+  const [places, setPlaces] = useState<NearbyGroceryPlace[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [mapError, setMapError] = useState('');
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const result = await Location.requestForegroundPermissionsAsync();
+        if (!active) return;
+        if (result.status !== 'granted') { setPermission('denied'); return; }
+        setPermission('granted');
+        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        if (!active) return;
+        const center = { latitude: pos.coords.latitude, longitude: pos.coords.longitude, latitudeDelta: 0.045, longitudeDelta: 0.045 };
+        setRegion(center);
+        setLoading(true);
+        const base = process.env.EXPO_PUBLIC_OFFERS_API_URL;
+        if (!base) throw new Error('Nearby store service is not configured.');
+        const response = await fetch(`${base.replace(/\/$/, '')}/nearby?lat=${center.latitude}&lon=${center.longitude}`);
+        if (!response.ok) throw new Error(`Nearby store service returned ${response.status}.`);
+        const data = await response.json();
+        if (active) setPlaces(Array.isArray(data.places) ? data.places : []);
+      } catch (e: any) { if (active) setMapError(e?.message || 'Could not load nearby stores.'); }
+      finally { if (active) setLoading(false); }
+    })();
+    return () => { active = false; };
+  }, []);
+  return (
+    <View style={{ gap: 10, marginTop: 8 }}>
+      <SectionTitle title="Nearby supermarkets & baqalas" action="Around you" />
+      <Text style={styles.helperText}>Allow location access to find nearby supermarkets, grocery shops and convenience stores. Only foreground location is requested. Place data: © OpenStreetMap contributors.</Text>
+      {permission === 'denied' ? <View style={styles.notice}><Text style={styles.noticeText}>Location permission was not granted. Enable location access in your phone settings to see nearby stores. You can still search and compare groceries.</Text></View>
+      : permission === 'pending' ? <View style={styles.empty}><Text style={styles.emptyText}>Requesting location permission…</Text></View>
+      : region ? <>
+        {Platform.OS !== 'web' ? <MapView style={{ height: 280, borderRadius: 18 }} initialRegion={region} showsUserLocation showsMyLocationButton>
+          {places.map((place) => <Marker key={place.id} coordinate={{ latitude: place.lat, longitude: place.lon }} title={place.name} description={place.category}>
+            <Callout onPress={() => place.phone ? Linking.openURL(`tel:${place.phone}`) : place.website ? openOffer({ label: place.name, webUrl: place.website }) : openOffer({ label: place.name, webUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name + ' ' + place.address)}` })}>
+              <View style={{ maxWidth: 220, padding: 4 }}><Text style={{ fontWeight: '800' }}>{place.name}</Text><Text>{place.address || place.category}</Text><Text style={{ color: '#176B4D', marginTop: 4 }}>{place.phone ? `Call ${place.phone}` : 'Tap to view store'}</Text></View>
+            </Callout>
+          </Marker>)}
+        </MapView> : <PrimaryButton label="Open nearby groceries in Maps ↗" onPress={() => Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${region.latitude},${region.longitude}+supermarket+grocery`) } />}
+        {loading && <Text style={styles.helperText}>Finding nearby shops…</Text>}
+        {!!mapError && <Text style={styles.helperText}>{mapError}</Text>}
+        {places.slice(0, 12).map((place) => <View key={place.id} style={styles.groceryCard}>
+          <View style={[styles.sampleImage, { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' }]}><Text style={{ fontSize: 23 }}>🏪</Text></View>
+          <View style={{ flex: 1 }}><Text style={styles.groceryName}>{place.name}</Text><Text style={styles.helperText}>{place.category} · {place.address || 'Nearby'}</Text>{place.phone ? <Text style={styles.helperText}>{place.phone}</Text> : null}</View>
+          {place.phone ? <TouchableOpacity onPress={() => Linking.openURL(`tel:${place.phone}`)}><Text style={styles.smallActionText}>CALL</Text></TouchableOpacity> : <TouchableOpacity onPress={() => openOffer({ label: place.name, webUrl: `https://www.google.com/maps/search/?api=1&query=${place.lat},${place.lon}` })}><Text style={styles.smallActionText}>MAP ↗</Text></TouchableOpacity>}
+        </View>)}
+        {!loading && places.length === 0 && !mapError && <Text style={styles.helperText}>No nearby grocery places were returned in the current search radius.</Text>}
+      </> : null}
+    </View>
+  );
+}
+
+function GroceryBasketScreen({ basket, setBasket, back }: {
+  basket: GroceryBasketLine[]; setBasket: React.Dispatch<React.SetStateAction<GroceryBasketLine[]>>; back: () => void;
+}) {
+  const subtotal = basket.reduce((sum, line) => sum + line.price * line.quantity, 0);
+  const byStore = Object.values(basket.reduce((groups, line) => {
+    if (!groups[line.store]) groups[line.store] = { store: line.store, total: 0, count: 0 };
+    groups[line.store].total += line.price * line.quantity; groups[line.store].count += line.quantity; return groups;
+  }, {} as Record<string, { store: string; total: number; count: number }>));
+  return <ScrollView contentContainerStyle={styles.page}>
+    <AppHeader title="Grocery basket" subtitle="Your selected supermarket items" onBack={back} />
+    {basket.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>Your grocery basket is empty</Text><Text style={styles.emptyText}>Search for groceries and tap “Add to basket” on a listing.</Text></View> : <>
+      {basket.map((line) => <View key={line.id} style={styles.groceryCard}>
+        <SampleImage label={line.title} imageUri={line.image || undefined} fallbackIcon="🛒" compact />
+        <View style={{ flex: 1, gap: 4 }}><Text style={styles.groceryName}>{line.title}</Text><Text style={styles.groceryQty}>{line.store} · {money(line.price)} each</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <TouchableOpacity onPress={() => setBasket((old) => old.map((x) => x.id === line.id ? { ...x, quantity: Math.max(1, x.quantity - 1) } : x))}><Text style={styles.smallActionText}>−</Text></TouchableOpacity>
+            <Text style={styles.groceryName}>{line.quantity}</Text>
+            <TouchableOpacity onPress={() => setBasket((old) => old.map((x) => x.id === line.id ? { ...x, quantity: x.quantity + 1 } : x))}><Text style={styles.smallActionText}>＋</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => openOffer({ label: line.title, webUrl: line.link })}><Text style={styles.smallActionText}>OPEN LISTING ↗</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => setBasket((old) => old.filter((x) => x.id !== line.id))}><Text style={{ color: '#B4473E', fontWeight: '800' }}>REMOVE</Text></TouchableOpacity>
+          </View>
+        </View>
+        <Text style={styles.breakValue}>{money(line.price * line.quantity)}</Text>
+      </View>)}
+      <View style={styles.platformCard}>
+        <Text style={styles.sectionTitle}>Subtotal by supermarket</Text>
+        {byStore.map((store) => <View key={store.store} style={styles.breakdown}><Text style={styles.breakLabel}>{store.store} ({store.count} items)</Text><Text style={styles.breakValue}>{money(store.total)}</Text></View>)}
+        <View style={styles.totalLine}><Text style={styles.totalLabel}>Items subtotal</Text><Text style={styles.totalValue}>{money(subtotal)}</Text></View>
+        <Text style={styles.helperText}>Delivery and service fees are excluded. Retailer carts are not connected to Waffer, so this basket is an estimate based on the listed item prices and does not place an order or transfer items.</Text>
+      </View>
+      {byStore.map((store) => <PrimaryButton key={store.store} label={`Open ${store.store} to buy ↗`} onPress={() => openOffer({ label: store.store, webUrl: buildStoreSearchUrl(basket.filter((x) => x.store === store.store).map((x) => x.title).join(' '), store.store) })} secondary />)}
+    </>}
+  </ScrollView>;
 }
 
 function GroceryCompareScreen({ groceryId, back }: { groceryId: string; back: () => void }) {
@@ -819,6 +989,7 @@ function BasketCompareScreen({ basket, back }: { basket: BasketLine[]; back: () 
 export default function App() {
   const [darkMode, setDarkMode] = useState(false);
   const [basket, setBasket] = useState<BasketLine[]>([]);
+  const [groceryBasket, setGroceryBasket] = useState<GroceryBasketLine[]>([]);
   activeColors = darkMode ? darkColors : lightColors;
   styles = createStyles(activeColors);
 
@@ -843,7 +1014,8 @@ export default function App() {
   else if (current.name === 'shoes') content = <ShoesScreen go={go} back={back} />;
   else if (current.name === 'shopping') content = <ShoppingScreen back={back} />;
   else if (current.name === 'shoeResults') content = <ShoeResultsScreen filters={current.filters} back={back} />;
-  else if (current.name === 'groceries') content = <GroceriesScreen go={go} back={back} />;
+  else if (current.name === 'groceries') content = <GroceriesScreen go={go} back={back} basket={groceryBasket} setBasket={setGroceryBasket} />;
+  else if (current.name === 'groceryBasket') content = <GroceryBasketScreen basket={groceryBasket} setBasket={setGroceryBasket} back={back} />;
   else if (current.name === 'groceryCompare') content = <GroceryCompareScreen groceryId={current.groceryId} back={back} />;
   else content = <GenericCategoryScreen title={current.title} back={back} />;
 

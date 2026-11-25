@@ -1,106 +1,27 @@
-# Waffer — MBZ City Food comparison university demo
+# App-side public endpoint. This URL is safe to include in Android/web builds.
+EXPO_PUBLIC_OFFERS_API_URL=https://waffer-api-3rvu.onrender.com
 
-Waffer is a React Native + Expo + TypeScript university prototype. This revision expands the Food section into a working comparison demo with six restaurant brands, multiple menu categories, item photographs, and four provider comparison rows per item.
+# Backend-only secret. Set this in Render Environment Variables or local backend .env.
+# Never prefix this with EXPO_PUBLIC_.
+SERPAPI_KEY=replace_with_your_private_key
 
-## Food catalogue
 
-**31 menu items across 6 restaurants**
+## Grocery comparison and nearby stores (application build)
 
-| Restaurant | Items | Variety |
-|---|---:|---|
-| McDonald's | 6 | Burgers, meals and chicken |
-| KFC | 4 | Sandwich, burger meals and chicken meals |
-| Pizza Hut | 3 | Super Supreme, pepperoni and Margherita pizzas |
-| Papa Johns | 8 | Pizza, toasted sandwiches and roasted wings |
-| Dunkin' | 5 | Donuts, bakery and iced coffee |
-| Starbucks | 5 | Bakery, focaccia, croissant and cold coffee |
+The Groceries screen searches the UAE Google Shopping results through the existing Waffer API `/offers` endpoint. Generic queries can return multiple brands and package sizes; listings are sorted by provider-returned item price. Product photos are displayed when the provider supplies a thumbnail. A missing photo or listing is not replaced with an invented one. Retailer listing links open the returned listing where available.
 
-The Food restaurant selector is populated from the active menu catalogue. Search and category filters work against the active catalogue.
+The grocery basket is a Waffer-side estimate. It groups selected products by retailer and calculates item subtotals only. It does not connect to retailer carts, transfer items, place orders, or include unverified delivery/service fees. The user can open each selected product listing or open the retailer's search page.
 
-## Price comparison model
+Nearby supermarkets and baqalas request foreground device location using `expo-location`. The API `/nearby?lat=...&lon=...` queries OpenStreetMap/Overpass for nearby grocery shops within 5 km and returns available names, coordinates, address and public phone/website tags. Place coverage and contact details depend on OpenStreetMap contributors. The app does not request background location.
 
-Every menu item has four price rows, sorted from lowest to highest by item price:
+### Install the grocery map dependencies
 
-- **VERIFIED** — a real price found in a linked restaurant or delivery-platform menu listing.
-- **DEMO** — a simulated price created for university testing. It is not a live provider offer and must not be represented as a real Talabat, Keeta, Smiles or Deliveroo quote.
-
-The app labels these statuses in both the menu card and item comparison screen. A DEMO row opens a provider-specific search or provider landing page; it does not claim to open a real offer or transfer an item to a cart.
-
-### Verified price coverage
-
-- McDonald's: six Talabat prices from the Mohammed Bin Zayed City 2 listing.
-- KFC: four listed prices from Mohamed Bin Zayed City / MBZ Market Deliveroo menus.
-- Pizza Hut: three listed prices from the Mohamed Bin Zayed City Deliveroo menu.
-- Papa Johns: eight prices from the official Papa Johns UAE menu. These are UAE menu prices; the official page does not establish that each price is specific to the MBZ branch.
-- Dunkin': four prices from the Careem Mohammed Bin Zayed City menu.
-- Starbucks: no item-level price was verified from the referenced UAE featured-menu page; its five price comparisons are all DEMO.
-
-Dunkin' Iced Coffee is also a DEMO-priced item. Its name and photograph come from the Dunkin UAE menu, but no exact MBZ branch price was verified for it.
-
-**Total: 25 menu items with one verified source price each, and 6 items with demo-only prices.** Every item has three additional DEMO comparison rows, except the five Starbucks items and Dunkin' Iced Coffee, which have four DEMO rows.
-
-Prices are item prices only. Delivery fees, service fees, promotions and checkout totals are not calculated. The price difference shown is a comparison of displayed item prices, not guaranteed savings.
-
-## Product photographs
-
-All 31 active menu items have a product-specific or official menu photograph URL and image provenance recorded in `src/menus/imported.json` and `IMAGE_SOURCES.md`. Images are loaded from their original HTTPS hosts and require an internet connection. If a third-party host changes or blocks an image, that photo may fail to load.
-
-## Location and ordering behaviour
-
-The Food area is labelled for Mohamed Bin Zayed City, Abu Dhabi. Branch-specific sources are used where available. Papa Johns official menu prices and Starbucks official menu photography are UAE-level source material rather than verified MBZ branch price listings.
-
-Provider actions open the verified listing when a verified price exists, or a provider search/landing page for a DEMO row. Waffer does not transfer a cart, place an order, process payment or guarantee a checkout price.
-
-## Other app sections
-
-Shopping, Groceries, Deals, Basket, Profile, existing navigation and theme settings were not intentionally changed. The update is limited to Food data, Food comparison presentation, the Food data type and Food documentation.
-
-## Run
+After extracting this project, run the following once in the project directory to install SDK 58-compatible native modules and update `package-lock.json`:
 
 ```bash
-npm install
-npx expo install --fix
-npx expo start
+npx expo install expo-location react-native-maps
 ```
 
-For web preview:
+Run this command before `npm ci` the first time; it updates `package.json` and `package-lock.json` to the SDK-compatible versions. Then run `npm ci` and start Expo as usual. `react-native-maps` is included in Expo Go for this SDK; for a future standalone Android build, follow the Expo map configuration instructions and provide a restricted Google Maps Android SDK key if required.
 
-```bash
-npx expo start --web
-```
-
-## Key files
-
-- `App.tsx` — app screens, navigation and Food UI
-- `src/data.ts` — restaurant metadata and non-Food prototype data
-- `src/menus/imported.json` — active 31-item Food catalogue and offer rows
-- `src/types.ts` — TypeScript data models
-- `MBZ_PRICE_AUDIT.md` — verified/demo price status and source URLs
-- `IMAGE_SOURCES.md` — product-photo provenance
-- `scripts/audit-food-catalog.mjs` — Food catalogue integrity audit
-
-## Live Shopping search and product videos
-
-The Shopping screen now searches live UAE Google Shopping listings through the Node.js proxy. Results are sorted by listed price (lowest first). Open a result's details to request Google Product data, which may include direct retailer product links and product-related videos. Video coverage is not guaranteed for every product; Waffer displays an honest no-video state rather than inventing media.
-
-Configure the backend in a private `.env` file at the project root:
-
-```env
-SERPAPI_KEY=your_private_serpapi_key
-```
-
-Start it locally with Node.js 20.6 or newer:
-
-```bash
-node --env-file=.env server/index.mjs
-```
-
-For local Expo development, add the backend address to `.env` (use your computer's LAN IP when testing on a phone):
-
-```env
-EXPO_PUBLIC_OFFERS_API_URL=http://YOUR_COMPUTER_LAN_IP:8787
-```
-
-The `EXPO_PUBLIC_OFFERS_API_URL` value is public configuration. Never put `SERPAPI_KEY` in an `EXPO_PUBLIC_` variable or commit `.env`. For a published web or Android build, deploy `server/index.mjs` to a public HTTPS Node.js host and set `EXPO_PUBLIC_OFFERS_API_URL` to that HTTPS service URL before building. GitHub Pages cannot host the Node.js API server.
-
-API endpoints: `/health`, `/offers?q=product-name`, and `/product?product_id=GOOGLE_SHOPPING_PRODUCT_ID`. Search results are cached for 10 minutes and product details for one hour in the running server. A basic in-memory per-IP request limit is applied; a production deployment should additionally use provider-side quota monitoring and stronger abuse controls.
+The local `.env` should contain `SERPAPI_KEY` for the server and `EXPO_PUBLIC_OFFERS_API_URL` for the app. On Render, keep `SERPAPI_KEY` in the backend environment settings and set the public API URL in the Expo app's build environment. Never commit `.env`.

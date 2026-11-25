@@ -22,6 +22,15 @@
       "eas": {
         "projectId": "43eb41d0-f4af-4e3f-bbf2-28ff988c1954"
       }
-    }
+    },
+    "plugins": [
+      "expo-status-bar",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Waffer uses your location to show nearby supermarkets and baqalas."
+        }
+      ]
+    ]
   }
 }

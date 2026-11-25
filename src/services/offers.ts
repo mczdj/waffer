@@ -35,14 +35,11 @@ export type ProductDetails = {
   videos: ProductVideo[];
 };
 
-// The API base URL is public configuration; the SerpApi key must remain on the server.
+// Public API base URL only. The SerpApi key must remain on the backend and is never bundled into the app.
 // @ts-ignore Expo inlines EXPO_PUBLIC_* at build time
 const BASE: string | undefined = process.env.EXPO_PUBLIC_OFFERS_API_URL;
-// Legacy local-only fallback. Never set this for a published web or Android build.
-// @ts-ignore
-const KEY: string | undefined = process.env.EXPO_PUBLIC_SERPAPI_KEY;
 
-export const livePricesConfigured = !!(BASE || KEY);
+export const livePricesConfigured = !!BASE;
 
 function safeHttpUrl(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -80,17 +77,11 @@ export async function fetchLiveOffers(query: string, signal?: AbortSignal): Prom
   const key = query.toLowerCase().trim();
   if (offerCache.has(key)) return offerCache.get(key)!;
   let offers: LiveOffer[] = [];
-  if (BASE) {
-    const res = await fetch(`${BASE.replace(/\/$/, '')}/offers?q=${encodeURIComponent(query)}`, { signal });
-    if (!res.ok) throw new Error(`Price service error ${res.status}`);
-    const data = await res.json();
-    offers = Array.isArray(data.offers) ? data.offers : [];
-  } else if (KEY) {
-    const params = new URLSearchParams({ engine: 'google_shopping', q: query, gl: 'ae', hl: 'en', google_domain: 'google.ae', api_key: KEY });
-    const res = await fetch(`https://serpapi.com/search.json?${params.toString()}`, { signal });
-    if (!res.ok) throw new Error(`Price service error ${res.status}`);
-    offers = normalize(await res.json());
-  }
+  if (!BASE) throw new Error('The hosted Waffer API URL is not configured.');
+  const res = await fetch(`${BASE.replace(/\/$/, '')}/offers?q=${encodeURIComponent(query)}`, { signal });
+  if (!res.ok) throw new Error(`Price service error ${res.status}`);
+  const data = await res.json();
+  offers = Array.isArray(data.offers) ? data.offers : [];
   offers = [...offers].sort((a, b) => a.price - b.price);
   offerCache.set(key, offers);
   return offers;
