@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "Waffer",
+    "slug": "waffer-demo",
+    "scheme": "waffer",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/Wafeer.png",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.university.wafferdemo"
+    },
+    "android": {
+      "package": "com.university.wafferdemo",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/Wafeer.png",
+        "backgroundColor": "#F8F4EA"
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "43eb41d0-f4af-4e3f-bbf2-28ff988c1954"
+      }
+    }
+  }
+}
