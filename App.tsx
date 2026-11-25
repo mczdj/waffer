@@ -27,7 +27,6 @@ type Screen =
   | { name: 'shoes' }
   | { name: 'shoeResults'; filters: ShoeFilters }
   | { name: 'shopping' }
-  | { name: 'shoppingCompare'; productId: string }
   | { name: 'groceries' }
   | { name: 'groceryCompare'; groceryId: string }
   | { name: 'category'; title: string };
@@ -44,7 +43,7 @@ type ShoeFilters = {
 };
 
 import { LOCAL_LOGOS } from './src/logos';
-import { fetchLiveOffers, livePricesConfigured, LiveOffer } from './src/services/offers';
+import { fetchLiveOffers, fetchProductDetails, livePricesConfigured, LiveOffer, ProductDetails } from './src/services/offers';
 
 const categories = ['Food', 'Groceries', 'Shopping', 'Electronics', 'Household'];
 const shoeTypes = ['Sneakers', 'Sports shoes', 'Casual shoes', 'Formal shoes', 'Sandals'];
@@ -544,164 +543,115 @@ function ShoeResult({ shoe, best }: { shoe: Shoe; best: boolean }) {
 }
 
 
-const shoppingProducts = [
-  { id: 'p1', name: 'Nike Revolution 7', category: 'Shoes', brand: 'Nike', imageUri: 'https://www.nike.ae/dw/image/v2/BDVB_PRD/on/demandware.static/-/Sites-akeneo-master-catalog/default/dwcfe0a4d6/nk/ffb/b/5/4/e/2/ffbb54e2_f757_48b3_83de_a0903f05d893.png?q=100&sh=700&sm=fit&strip=false&sw=700', samplePrice: 219, retailer: 'Noon', url: 'https://www.noon.com/uae-en/', offers: [{ retailer: 'Noon', price: 219 }, { retailer: 'Amazon.ae', price: 229 }, { retailer: 'Namshi', price: 249 }] },
-  { id: 'p2', name: 'Adidas Runfalcon 5', category: 'Shoes', brand: 'Adidas', imageUri: 'https://assets.adidas.com/images/w_1880,f_auto,q_auto/b64f5377913a4d51a6d0fa62b69d1ebc_9366/JR5089_HM1.jpg', samplePrice: 235, retailer: 'Amazon.ae', url: 'https://www.amazon.ae/', offers: [{ retailer: 'Amazon.ae', price: 235 }, { retailer: 'Noon', price: 249 }, { retailer: 'Namshi', price: 259 }] },
-  { id: 'p3', name: 'Puma Caven 2.0', category: 'Shoes', brand: 'Puma', imageUri: 'https://images.puma.com/image/upload/f_auto,q_auto,w_600,b_rgb:FAFAFA/global/392290/80/sv01/fnd/ARE/fmt/png', samplePrice: 189, retailer: 'Namshi', url: 'https://www.namshi.com/uae-en/', offers: [{ retailer: 'Namshi', price: 189 }, { retailer: 'Noon', price: 205 }, { retailer: 'Amazon.ae', price: 219 }] },
-  { id: 'p4', fallbackIcon: '👕', name: 'Basic Cotton T-Shirt', category: 'Fashion', brand: 'Fashion', samplePrice: 39, retailer: 'Centrepoint', url: 'https://www.centrepointstores.com/ae/en/', offers: [{ retailer: 'Centrepoint', price: 39 }, { retailer: 'Noon', price: 45 }, { retailer: 'Amazon.ae', price: 49 }] },
-  { id: 'p5', fallbackIcon: '👗', name: 'Women Casual Dress', category: 'Fashion', brand: 'Fashion', samplePrice: 89, retailer: 'Namshi', url: 'https://www.namshi.com/uae-en/', offers: [{ retailer: 'Namshi', price: 89 }, { retailer: 'Noon', price: 99 }, { retailer: 'Amazon.ae', price: 109 }] },
-  { id: 'p6', fallbackIcon: '🎒', name: 'Classic Backpack', category: 'Fashion', brand: 'Accessories', samplePrice: 79, retailer: 'Noon', url: 'https://www.noon.com/uae-en/', offers: [{ retailer: 'Noon', price: 79 }, { retailer: 'Amazon.ae', price: 89 }, { retailer: 'Centrepoint', price: 99 }] },
-  { id: 'p7', fallbackIcon: '💄', name: 'Maybelline Mascara', category: 'Beauty', brand: 'Maybelline', samplePrice: 42, retailer: 'Amazon.ae', url: 'https://www.amazon.ae/', offers: [{ retailer: 'Amazon.ae', price: 42 }, { retailer: 'Noon', price: 45 }, { retailer: 'Namshi', price: 49 }] },
-  { id: 'p8', fallbackIcon: '🧴', name: 'CeraVe Moisturising Cream', category: 'Beauty', brand: 'CeraVe', samplePrice: 65, retailer: 'Noon', url: 'https://www.noon.com/uae-en/', offers: [{ retailer: 'Noon', price: 65 }, { retailer: 'Amazon.ae', price: 69 }, { retailer: 'Namshi', price: 74 }] },
-  { id: 'p9', fallbackIcon: '🧴', name: 'The Ordinary Niacinamide', category: 'Beauty', brand: 'The Ordinary', samplePrice: 49, retailer: 'Namshi', url: 'https://www.namshi.com/uae-en/', offers: [{ retailer: 'Namshi', price: 49 }, { retailer: 'Noon', price: 54 }, { retailer: 'Amazon.ae', price: 59 }] },
-];
-
-function buildRetailerSearchUrl(query: string, retailer: string) {
-  const domains: Record<string, string> = {
-    'Noon': 'noon.com/uae-en',
-    'Amazon.ae': 'amazon.ae',
-    'Namshi': 'namshi.com/uae-en',
-    'Centrepoint': 'centrepointstores.com/ae/en',
-  };
-  const domain = domains[retailer];
-  const search = domain ? `site:${domain} \"${query}\" UAE` : `\"${query}\" \"${retailer}\" UAE`;
-  return `https://www.google.com/search?q=${encodeURIComponent(search)}`;
-}
-
-const ONLINE_RETAILERS: { name: string; icon: string; url: (q: string) => string }[] = [
-  { name: 'Google Shopping', icon: '🔎', url: (q) => `https://www.google.com/search?tbm=shop&gl=ae&hl=en&q=${encodeURIComponent(q)}` },
-  { name: 'Amazon.ae', icon: '📦', url: (q) => `https://www.amazon.ae/s?k=${encodeURIComponent(q)}` },
-  { name: 'Noon', icon: '🟡', url: (q) => `https://www.noon.com/uae-en/search/?q=${encodeURIComponent(q)}` },
-  { name: 'Namshi', icon: '👗', url: (q) => buildRetailerSearchUrl(q, 'Namshi') },
-  { name: 'Brands For Less', icon: '🏷️', url: (q) => `https://www.google.com/search?q=${encodeURIComponent(`site:brandsforless.com/en-ae ${q}`)}` },
-  { name: 'Centrepoint', icon: '🛍️', url: (q) => buildRetailerSearchUrl(q, 'Centrepoint') },
-  { name: 'Carrefour', icon: '🛒', url: (q) => `https://www.carrefouruae.com/mafuae/en/search?keyword=${encodeURIComponent(q)}` },
-  { name: 'Lulu Hypermarket', icon: '🛒', url: (q) => `https://www.google.com/search?q=${encodeURIComponent(`site:luluhypermarket.com/en-ae ${q}`)}` },
-];
-
-/** Live prices (when the price service is configured) + direct store searches for any term. */
+/** Live UAE Shopping results with on-demand retailer links and product-specific videos. */
 function OnlineOffers({ query }: { query: string }) {
   const [offers, setOffers] = useState<LiveOffer[]>([]);
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
+  const [details, setDetails] = useState<Record<string, ProductDetails>>({});
+  const [loadingProduct, setLoadingProduct] = useState<string | null>(null);
+  const [detailErrors, setDetailErrors] = useState<Record<string, string>>({});
+
   useEffect(() => {
-    if (!livePricesConfigured) return;
+    if (!livePricesConfigured) { setOffers([]); setStatus('idle'); return; }
     setStatus('loading');
     const ctrl = new AbortController();
-    const t = setTimeout(() => {
-      fetchLiveOffers(query, ctrl.signal).then((o) => { setOffers(o); setStatus('done'); }).catch((e) => { if (e?.name !== 'AbortError') setStatus('error'); });
-    }, 700);
-    return () => { clearTimeout(t); ctrl.abort(); };
+    const timer = setTimeout(() => {
+      fetchLiveOffers(query, ctrl.signal)
+        .then((items) => { setOffers(items); setStatus('done'); })
+        .catch((error) => { if (error?.name !== 'AbortError') setStatus('error'); });
+    }, 650);
+    return () => { clearTimeout(timer); ctrl.abort(); };
   }, [query]);
+
+  const loadDetails = async (offer: LiveOffer) => {
+    if (!offer.productId || details[offer.productId] || loadingProduct) return;
+    setLoadingProduct(offer.productId);
+    setDetailErrors((old) => ({ ...old, [offer.productId!]: '' }));
+    try {
+      const value = await fetchProductDetails(offer.productId);
+      setDetails((old) => ({ ...old, [offer.productId!]: value }));
+    } catch (error: any) {
+      setDetailErrors((old) => ({ ...old, [offer.productId!]: error?.message || 'Could not load product details.' }));
+    } finally {
+      setLoadingProduct(null);
+    }
+  };
+
   return (
     <View>
-      {livePricesConfigured ? (
-        <>
-          <SectionTitle title={`Prices for “${query}”`} action={status === 'done' ? `${offers.length} offers` : ''} />
-          {status === 'loading' && <Text style={styles.helperText}>Finding the best prices…</Text>}
-          {status === 'error' && <View style={styles.notice}><Text style={styles.noticeText}>Couldn't reach the price service. Check that the server is running and the phone is on the same network.</Text></View>}
-          {status === 'done' && offers.length === 0 && <Text style={styles.helperText}>No priced listings found. Try the store searches below.</Text>}
-          {offers.map((o, i) => (
-            <TouchableOpacity key={`${o.store}-${o.link}-${i}`} style={[styles.menuCard, i === 0 && styles.bestCard]} onPress={() => openOffer({ label: o.store, webUrl: o.link })}>
-              <SampleImage label={o.title} imageUri={o.image ?? undefined} compact />
+      <SectionTitle title={`Live UAE results for “${query}”`} action={status === 'done' ? `${offers.length} listings` : ''} />
+      {!livePricesConfigured && <View style={styles.notice}><Text style={styles.noticeText}>Live shopping search is not configured. Connect the Waffer API server to show current listings, retailer links and videos.</Text></View>}
+      {status === 'loading' && <Text style={styles.helperText}>Searching UAE listings and sorting by lowest price…</Text>}
+      {status === 'error' && <View style={styles.notice}><Text style={styles.noticeText}>Waffer could not reach the Shopping API. Check the API server address and internet connection, then try again.</Text></View>}
+      {status === 'done' && offers.length === 0 && <Text style={styles.helperText}>No priced listings were found. Try a more specific product name.</Text>}
+      {offers.map((offer, index) => {
+        const id = offer.productId;
+        const productDetails = id ? details[id] : undefined;
+        return (
+          <View key={`${offer.store}-${offer.link}-${index}`} style={[styles.platformCard, index === 0 && styles.bestCard]}>
+            <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+              <SampleImage label={offer.title} imageUri={offer.image ?? undefined} compact />
               <View style={{ flex: 1 }}>
-                <Text numberOfLines={2} style={styles.menuName}>{o.title}</Text>
-                <Text style={styles.menuDescription}>{o.store}{o.delivery ? ` · ${o.delivery}` : ''}</Text>
-                <Text style={styles.menuPrice}>{o.priceText}</Text>
-                {i === 0 && <Text style={styles.bestBadgeText}>LOWEST PRICE</Text>}
+                <Text style={styles.menuName}>{offer.title}</Text>
+                <Text style={styles.menuDescription}>{offer.store}{offer.delivery ? ` · ${offer.delivery}` : ''}</Text>
+                <Text style={styles.menuPrice}>{offer.priceText}</Text>
+                {index === 0 && <Text style={styles.bestBadgeText}>LOWEST LISTED PRICE</Text>}
               </View>
-              <Text style={styles.addLabel}>OPEN ↗</Text>
-            </TouchableOpacity>
-          ))}
-          <Text style={styles.helperText}>Prices come from Google Shopping at the moment of search and can change; confirm the final price, size and delivery on the store page.</Text>
-        </>
-      ) : (
-        <View style={styles.notice}><Text style={styles.noticeText}>Live prices need a price-service key (free tier available). Add it in the .env file (see README, "Live shopping prices"). Until then, the store buttons below open each store's own results.</Text></View>
-      )}
-      <SectionTitle title="Search directly in stores" action={`${ONLINE_RETAILERS.length} stores`} />
-      {ONLINE_RETAILERS.map((r) => (
-        <TouchableOpacity key={r.name} style={styles.platformCard} onPress={() => openOffer({ label: r.name, webUrl: r.url(query), fallbackUrl: retailerHome(r.name) })}>
-          <View style={styles.platformTop}>
-            <BrandBadge name={r.name} icon={r.icon} />
-            <Text style={styles.addLabel}>VIEW OFFERS ↗</Text>
+            </View>
+            {id ? (
+              <PrimaryButton label={productDetails ? 'Store links and videos loaded' : loadingProduct === id ? 'Loading store links and videos…' : 'View store links and product videos'} onPress={() => loadDetails(offer)} secondary />
+            ) : (
+              <PrimaryButton label="Open Google Shopping listing ↗" onPress={() => openOffer({ label: offer.store, webUrl: offer.link })} secondary />
+            )}
+            {!!id && !!detailErrors[id] && <Text style={styles.helperText}>{detailErrors[id]}</Text>}
+            {productDetails && (
+              <View style={{ marginTop: 10, gap: 10 }}>
+                <SectionTitle title="Buy from a retailer" action={`${productDetails.stores.length} links`} />
+                {productDetails.stores.length === 0 ? <Text style={styles.helperText}>No direct retailer links were returned for this listing. Use the Google Shopping listing instead.</Text> : productDetails.stores.map((store, storeIndex) => (
+                  <View key={`${store.name}-${store.link}-${storeIndex}`} style={styles.platformTop}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.listTitle}>{store.name}</Text>
+                      <Text style={styles.helperText}>{store.priceText}{store.shipping ? ` · ${store.shipping}` : ''}</Text>
+                      {!!store.availability && <Text style={styles.helperText}>{store.availability}</Text>}
+                    </View>
+                    <TouchableOpacity onPress={() => openOffer({ label: store.name, webUrl: store.link })} style={styles.smallAction}>
+                      <Text style={styles.smallActionText}>TAKE ME TO STORE ↗</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                <SectionTitle title="Product videos" action={`${productDetails.videos.length} found`} />
+                {productDetails.videos.length === 0 ? <Text style={styles.helperText}>No product-specific videos were found for this listing. Waffer will not substitute unrelated or invented videos.</Text> : productDetails.videos.map((video, videoIndex) => (
+                  <TouchableOpacity key={`${video.link}-${videoIndex}`} style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }} onPress={() => openOffer({ label: video.title, webUrl: video.link })}>
+                    {video.thumbnail ? <Image source={{ uri: video.thumbnail }} style={{ width: 112, height: 70, borderRadius: 10, backgroundColor: activeColors.surface }} resizeMode="cover" /> : <View style={{ width: 112, height: 70, borderRadius: 10, backgroundColor: activeColors.surface, alignItems: 'center', justifyContent: 'center' }}><Text>▶</Text></View>}
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.listTitle}>{video.title}</Text>
+                      <Text style={styles.helperText}>{video.source}{video.channel ? ` · ${video.channel}` : ''}{video.duration ? ` · ${video.duration}` : ''}</Text>
+                      <Text style={styles.smallActionText}>WATCH VIDEO ↗</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
           </View>
-        </TouchableOpacity>
-      ))}
+        );
+      })}
+      {status === 'done' && <Text style={styles.helperText}>Listings are retrieved from Google Shopping for the UAE and sorted by listed item price. Prices and stock can change; check delivery, product variant and final checkout total with the retailer.</Text>}
     </View>
   );
 }
 
-function ShoppingScreen({ go, back }: { go: (s: Screen) => void; back: () => void }) {
+function ShoppingScreen({ back }: { back: () => void }) {
   const [query, setQuery] = useState('');
-  const [category, setCategory] = useState('All');
-  const [sort, setSort] = useState('Cheapest');
-  const categories = ['All', 'Fashion', 'Beauty', 'Shoes'];
   const cleanQuery = query.trim();
-  const results = shoppingProducts
-    .filter((p) => (category === 'All' || p.category === category) && `${p.name} ${p.brand} ${p.category}`.toLowerCase().includes(cleanQuery.toLowerCase()))
-    .sort((a,b) => sort === 'Highest' ? b.samplePrice-a.samplePrice : a.samplePrice-b.samplePrice);
-  return <ScrollView contentContainerStyle={styles.page}>
-    <AppHeader title="Shopping" subtitle="Fashion · Beauty · Shoes · Abu Dhabi" onBack={back} />
-    <TextInput style={styles.bigInput} placeholder="Search for a product (e.g. Nike Air Max, mascara)..." value={query} onChangeText={setQuery} returnKeyType="search" />
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>{categories.map((x) => <Pill key={x} text={x} selected={category === x} onPress={() => setCategory(x)} />)}</ScrollView>
-    <View style={styles.notice}><Text style={styles.noticeText}>SEARCH PRODUCTS · Choose a product to compare its available retailer offers. Catalogue prices below are illustrative until live retailer feeds are connected.</Text></View>
-    {cleanQuery.length > 1 && <OnlineOffers query={cleanQuery} />}
-    <SectionTitle title={cleanQuery ? `Compare sample prices for “${cleanQuery}”` : 'Popular products'} action={`${results.length} results`} />
-    <View style={styles.wrap}>{(['Cheapest','Highest'] as const).map((x) => <Pill key={x} text={`${x} first`} selected={sort === x} onPress={() => setSort(x)} />)}</View>
-    {results.map((product) => <TouchableOpacity key={product.id} style={styles.menuCard} onPress={() => go({ name: 'shoppingCompare', productId: product.id })}>
-      <SampleImage label={product.name} imageUri={(product as any).imageUri} fallbackIcon={(product as any).fallbackIcon ?? '🛍️'} compact />
-      <View style={{ flex: 1 }}>
-        <Text style={styles.menuName}>{product.name}</Text>
-        <Text style={styles.menuDescription}>{product.category} · {product.brand}</Text>
-        <Text style={styles.menuPrice}>From {money(Math.min(...product.offers.map((o:any) => o.price)))}</Text>
-        <Text style={styles.helperText}>{product.offers.length} retailer offers · sample prices</Text>
-      </View>
-      <Text style={styles.addLabel}>SEE ALL OFFERS</Text>
-    </TouchableOpacity>)}
-    {cleanQuery && results.length === 0 && <Text style={styles.helperText}>No sample-price comparison exists for this item, so use the store offers above.</Text>}
-    <Text style={styles.disclaimer}>Select a product to see its retailer comparison, just like the Food section. Prices are illustrative, not live-verified. Selecting an offer opens the retailer's product search so you can confirm the exact variant and buy there.</Text>
-  </ScrollView>;
-}
-
-function ShoppingCompareScreen({ productId, back }: { productId: string; back: () => void }) {
-  const product = shoppingProducts.find((p) => p.id === productId);
-  if (!product) return <SafeAreaView style={styles.safe}><Text>Product not found.</Text></SafeAreaView>;
-  const offers = [...product.offers].sort((a:any,b:any) => a.price-b.price);
-  const lowest = offers[0];
-  return <ScrollView contentContainerStyle={styles.page}>
-    <AppHeader title="Compare offers" subtitle="Shopping · Abu Dhabi" onBack={back} />
-    <View style={styles.platformCard}>
-      <Text style={styles.listTitle}>{product.name}</Text>
-      <Text style={styles.listSub}>{product.category} · {product.brand}</Text>
-      <Text style={styles.helperText}>Illustrative comparison · prices not live-verified</Text>
-    </View>
-    <SectionTitle title="Available retailer offers" action={`${offers.length} offers`} />
-    {offers.map((offer:any, index:number) => <View key={`${product.id}-${offer.retailer}`} style={[styles.platformCard, index===0 && styles.bestCard]}>
-      <View style={styles.platformTop}>
-        <View style={{flex:1}}>
-          <Text style={styles.listTitle}>{offer.retailer}</Text>
-          {index===0 && <Text style={styles.bestBadgeText}>LOWEST SAMPLE PRICE</Text>}
-        </View>
-        <Text style={styles.totalValue}>{money(offer.price)}</Text>
-      </View>
-      <PrimaryButton label={`See offer at ${offer.retailer} ↗`} onPress={() => openOffer({ label: offer.retailer, webUrl: buildRetailerSearchUrl(product.name, offer.retailer), fallbackUrl: retailerHome(offer.retailer) })} secondary={index!==0} />
-    </View>)}
-    {lowest && <View style={styles.savingResult}><Text style={styles.savingResultLabel}>Lowest sample price</Text><Text style={styles.savingResultValue}>{money(lowest.price)}</Text><Text style={styles.savingResultText}>Check seller, size/colour, delivery charges and final checkout price on the retailer's website or app.</Text></View>}
-    <Text style={styles.disclaimer}>Waffer opens the retailer's search for this product. Direct product links and live price feeds require approved retailer integrations.</Text>
-  </ScrollView>;
-}
-
-function retailerHome(store: string) {
-  const homes: Record<string, string> = {
-    'Noon': 'https://www.noon.com/uae-en/',
-    'Amazon.ae': 'https://www.amazon.ae/',
-    'Namshi': 'https://www.namshi.com/uae-en/',
-    'Centrepoint': 'https://www.centrepointstores.com/ae/en/',
-    'Google Shopping': 'https://shopping.google.com/',
-    'Brands For Less': 'https://www.brandsforless.com/en-ae',
-    'Carrefour': 'https://www.carrefouruae.com/',
-    'Lulu Hypermarket': 'https://www.luluhypermarket.com/en-ae',
-  };
-  return homes[store] ?? 'https://www.google.com/';
+  return (
+    <ScrollView contentContainerStyle={styles.page}>
+      <AppHeader title="Shopping" subtitle="Search products across UAE stores" onBack={back} />
+      <TextInput style={styles.bigInput} placeholder="Search any product (e.g. lipstick, Nike Air Max, headphones)…" value={query} onChangeText={setQuery} returnKeyType="search" />
+      <View style={styles.notice}><Text style={styles.noticeText}>LIVE PRODUCT COMPARISON · Search for any item to see available UAE listings, product images and prices sorted from lowest to highest. Open a listing to retrieve direct retailer links and product videos where available.</Text></View>
+      {cleanQuery.length > 1 ? <OnlineOffers query={cleanQuery} /> : <View style={styles.empty}><Text style={styles.emptyTitle}>What are you looking for?</Text><Text style={styles.emptyText}>Enter a product name above. Waffer will search available UAE listings instead of showing fixed sample products or invented prices.</Text></View>}
+      <Text style={styles.disclaimer}>Waffer uses third-party shopping search data. Listings, prices, availability and video coverage depend on the provider and may change. A product video is shown only when a matching video is returned by the product data source.</Text>
+    </ScrollView>
+  );
 }
 
 function openRestaurantFullMenu(name: string, restaurantId: string) {
@@ -891,8 +841,7 @@ export default function App() {
   else if (current.name === 'basketCompare') content = <BasketCompareScreen basket={basket} back={back} />;
   else if (current.name === 'foodCompare') content = <FoodCompareScreen itemId={current.itemId} quantity={current.quantity} option={current.option} back={back} setBasket={setBasket} go={go} />;
   else if (current.name === 'shoes') content = <ShoesScreen go={go} back={back} />;
-  else if (current.name === 'shopping') content = <ShoppingScreen go={go} back={back} />;
-  else if (current.name === 'shoppingCompare') content = <ShoppingCompareScreen productId={current.productId} back={back} />;
+  else if (current.name === 'shopping') content = <ShoppingScreen back={back} />;
   else if (current.name === 'shoeResults') content = <ShoeResultsScreen filters={current.filters} back={back} />;
   else if (current.name === 'groceries') content = <GroceriesScreen go={go} back={back} />;
   else if (current.name === 'groceryCompare') content = <GroceryCompareScreen groceryId={current.groceryId} back={back} />;
@@ -1063,6 +1012,8 @@ function createStyles(colors: ThemeColors) {
   shoePrice: { color: activeColors.greenDark, fontSize: 19, fontWeight: '900', marginTop: 8 },
   shoeFee: { color: colors.muted, fontSize: 10, marginTop: 3 },
   offerSub: { color: colors.muted, fontSize: 11, marginTop: 3 },
+  smallAction: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: activeColors.greenSoft },
+  smallActionText: { color: activeColors.greenDark, fontSize: 10, fontWeight: '800' },
   helperText: { color: colors.muted, fontSize: 11, marginTop: -7 },
   priceOpenButton: { backgroundColor: activeColors.greenSoft, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   priceOpenText: { color: activeColors.greenDark, fontSize: 11, fontWeight: '900' },

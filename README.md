@@ -78,3 +78,29 @@ npx expo start --web
 - `MBZ_PRICE_AUDIT.md` — verified/demo price status and source URLs
 - `IMAGE_SOURCES.md` — product-photo provenance
 - `scripts/audit-food-catalog.mjs` — Food catalogue integrity audit
+
+## Live Shopping search and product videos
+
+The Shopping screen now searches live UAE Google Shopping listings through the Node.js proxy. Results are sorted by listed price (lowest first). Open a result's details to request Google Product data, which may include direct retailer product links and product-related videos. Video coverage is not guaranteed for every product; Waffer displays an honest no-video state rather than inventing media.
+
+Configure the backend in a private `.env` file at the project root:
+
+```env
+SERPAPI_KEY=your_private_serpapi_key
+```
+
+Start it locally with Node.js 20.6 or newer:
+
+```bash
+node --env-file=.env server/index.mjs
+```
+
+For local Expo development, add the backend address to `.env` (use your computer's LAN IP when testing on a phone):
+
+```env
+EXPO_PUBLIC_OFFERS_API_URL=http://YOUR_COMPUTER_LAN_IP:8787
+```
+
+The `EXPO_PUBLIC_OFFERS_API_URL` value is public configuration. Never put `SERPAPI_KEY` in an `EXPO_PUBLIC_` variable or commit `.env`. For a published web or Android build, deploy `server/index.mjs` to a public HTTPS Node.js host and set `EXPO_PUBLIC_OFFERS_API_URL` to that HTTPS service URL before building. GitHub Pages cannot host the Node.js API server.
+
+API endpoints: `/health`, `/offers?q=product-name`, and `/product?product_id=GOOGLE_SHOPPING_PRODUCT_ID`. Search results are cached for 10 minutes and product details for one hour in the running server. A basic in-memory per-IP request limit is applied; a production deployment should additionally use provider-side quota monitoring and stronger abuse controls.
