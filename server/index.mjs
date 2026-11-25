@@ -132,5 +132,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       console.error('Waffer API error:', error.message);
       return send(res, 502, { error: 'The shopping provider could not complete this request. Please try again shortly.' });
     }
-  }).listen(PORT, () => console.log(`Waffer shopping API listening on :${PORT}`));
-}
+}).listen(PORT, '0.0.0.0', () => {
+  console.log(`Waffer shopping API listening on :${PORT}`);
+});}
