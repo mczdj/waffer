@@ -17,11 +17,11 @@ import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
 import MapView, { Marker, Callout, Region } from 'react-native-maps';
 import { darkColors, lightColors, radius, ThemeColors } from './src/theme';
-import { deals, groceries, menuItems, restaurants, shoes } from './src/data';
+import { groceries, menuItems, restaurants, shoes } from './src/data';
 import { Grocery, MenuItem, PlatformPrice, Shoe } from './src/types';
 import { buildStoreSearchUrl, openLocationSearch, openOffer } from './src/utils/offerNavigation';
 
-type TabName = 'Home' | 'Explore' | 'Compare' | 'Deals' | 'Basket' | 'Profile';
+type TabName = 'Home' | 'Explore' | 'Deals' | 'Basket' | 'Profile';
 type Screen =
   | { name: 'tabs'; tab: TabName }
   | { name: 'food' }
@@ -51,6 +51,7 @@ type ShoeFilters = {
 
 import { LOCAL_LOGOS } from './src/logos';
 import { fetchLiveOffers, fetchProductDetails, livePricesConfigured, LiveOffer, ProductDetails } from './src/services/offers';
+import { fetchCurrentDeals, LiveDeal } from './src/services/deals';
 
 const categories = ['Food', 'Groceries', 'Shopping'];
 const shoeTypes = ['Sneakers', 'Sports shoes', 'Casual shoes', 'Formal shoes', 'Sandals'];
@@ -187,6 +188,19 @@ function RestaurantLogo({ name, logoUri }: { name: string; logoUri?: string }) {
 
 function HomeScreen({ go }: { go: (screen: Screen) => void }) {
   const [search, setSearch] = useState('');
+  const [popularDeals, setPopularDeals] = useState<LiveDeal[]>([]);
+  const [dealsLoading, setDealsLoading] = useState(true);
+  const [dealsError, setDealsError] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    fetchCurrentDeals()
+      .then((items) => { if (active) { setPopularDeals(items.slice(0, 6)); setDealsError(false); } })
+      .catch(() => { if (active) { setPopularDeals([]); setDealsError(true); } })
+      .finally(() => { if (active) setDealsLoading(false); });
+    return () => { active = false; };
+  }, []);
+
   const handleSearch = () => {
     const q = search.trim().toLowerCase();
     if (!q) return;
@@ -202,7 +216,7 @@ function HomeScreen({ go }: { go: (screen: Screen) => void }) {
       <View style={styles.hero}>
         <Text style={styles.heroEyebrow}>SHOP SMARTER</Text>
         <Text style={styles.heroTitle}>Find what you want. Pay less.</Text>
-        <Text style={styles.heroText}>Compare the total price before you buy — not just the sticker price.</Text>
+        <Text style={styles.heroText}>Find current offers and choose what works for you.</Text>
         <View style={styles.searchRow}>
           <TextInput
             style={styles.searchInput}
@@ -232,55 +246,46 @@ function HomeScreen({ go }: { go: (screen: Screen) => void }) {
           >
             <View style={styles.categoryArt}><Text style={styles.categoryArtText}>{cat.slice(0, 1)}</Text></View>
             <Text style={styles.categoryName}>{cat}</Text>
-            {i < 3 && <Text style={styles.categoryHint}>Compare now</Text>}
+            {i < 3 && <Text style={styles.categoryHint}>Explore now</Text>}
           </TouchableOpacity>
         ))}
       </View>
 
       <TouchableOpacity style={styles.savingsBanner} onPress={() => go({ name: 'food' })}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.savingsMini}>FIND THE CHEAPEST OPTION</Text>
+          <Text style={styles.savingsMini}>FIND THE BEST VALUE</Text>
           <Text style={styles.savingsTitle}>One item. Multiple stores. One best price.</Text>
-          <Text style={styles.savingsText}>Waffer compares the final estimated total and ranks your options.</Text>
+          <Text style={styles.savingsText}>Explore current offers before you buy.</Text>
         </View>
         <View style={styles.savingsBubble}><Text style={styles.savingsBubbleText}>Save</Text></View>
       </TouchableOpacity>
 
-      <SectionTitle title="Popular deals" action="Demo Data" />
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
-        {deals.map((deal) => (
-          <View key={deal.id} style={styles.dealCard}>
-            {deal.sponsored && <Text style={styles.sponsored}>SPONSORED</Text>}
-            <Text style={styles.dealTitle}>{deal.title}</Text>
-            <Text style={styles.dealSource}>{deal.source}</Text>
-            <View style={styles.priceLine}>
-              <Text style={styles.oldPrice}>{money(deal.original)}</Text>
-              <Text style={styles.newPrice}>{money(deal.price)}</Text>
-            </View>
-          </View>
-        ))}
-      </ScrollView>
-
-      <SectionTitle title="Trending products" />
-      <View style={styles.productRow}>
-        <TouchableOpacity style={styles.miniProduct} onPress={() => go({ name: 'shopping' })}>
-          <SampleImage label="Adidas Runfalcon 5" imageUri={shoes.find((shoe) => shoe.id === 's2')?.imageUri} fallbackIcon={shoes.find((shoe) => shoe.id === 's2')?.fallbackIcon} compact />
-          <Text style={styles.miniProductName}>Everyday sneakers</Text>
-          <Text style={styles.miniProductPrice}>From AED 189</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.miniProduct} onPress={() => go({ name: 'groceries' })}>
-          <SampleImage label="Milk 1L" imageUri={groceries.find((grocery) => grocery.id === 'g1')?.imageUri} fallbackIcon={groceries.find((grocery) => grocery.id === 'g1')?.fallbackIcon} compact />
-          <Text style={styles.miniProductName}>Almarai Milk 1L</Text>
-          <Text style={styles.miniProductPrice}>From AED 6.75</Text>
-        </TouchableOpacity>
+      <View style={styles.sectionTitleRow}>
+        <Text style={styles.sectionTitle}>Popular deals</Text>
+        <Text style={styles.sectionAction}>LIVE UAE OFFERS</Text>
       </View>
-
-      <SectionTitle title="Recently compared" />
-      <View style={styles.infoCard}>
-        <Text style={styles.infoTitle}>Big Mac Meal</Text>
-        <Text style={styles.infoText}>Best demo total: AED 28.00 · Potential saving: AED 8.50</Text>
-      </View>
-    </ScrollView>
+      {dealsLoading ? (
+        <View style={styles.infoCard}><Text style={styles.infoText}>Checking current UAE promotions…</Text></View>
+      ) : popularDeals.length ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
+          {popularDeals.map((deal) => (
+            <TouchableOpacity key={deal.id} style={styles.dealCard} onPress={() => Linking.openURL(deal.url)}>
+              <Text style={styles.sponsored}>CURRENT PROMOTION</Text>
+              <Text style={styles.dealTitle} numberOfLines={3}>{deal.title}</Text>
+              <Text style={styles.dealSource}>{deal.store}</Text>
+              <Text style={styles.dealValidity}>{deal.validUntil ? `Valid until ${deal.validUntil}` : 'Check flyer for dates'}</Text>
+              <Text style={styles.dealOpen}>Open flyer ↗</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      ) : (
+        <View style={styles.infoCard}>
+          <Text style={styles.infoText}>{dealsError ? 'Live offers could not be refreshed right now.' : 'No active flyers were found right now.'} Browse the current UAE promotion directory instead.</Text>
+          <PrimaryButton label="Browse UAE deals" secondary onPress={() => Linking.openURL('https://ads21.net/ae/')} />
+        </View>
+      )}
+      <Text style={styles.disclaimer}>Promotions link to retailer flyers and catalogues. Product prices, discount amounts, participating branches and stock are subject to each retailer’s terms; check the flyer before purchasing.</Text>
+</ScrollView>
   );
 }
 
@@ -295,7 +300,7 @@ function ExploreScreen({ go }: { go: (s: Screen) => void }) {
         {visible.map((cat) => (
           <TouchableOpacity key={cat} style={styles.listCard} onPress={() => cat === 'Food' ? go({ name: 'food' }) : cat === 'Shopping' ? go({ name: 'shopping' }) : cat === 'Groceries' ? go({ name: 'groceries' }) : go({ name: 'category', title: cat })}>
             <View style={styles.listIcon}><Text style={styles.listIconText}>{cat[0]}</Text></View>
-            <View style={{ flex: 1 }}><Text style={styles.listTitle}>{cat}</Text><Text style={styles.listSub}>Search, filter and compare prices</Text></View>
+            <View style={{ flex: 1 }}><Text style={styles.listTitle}>{cat}</Text><Text style={styles.listSub}>Search products and browse available offers</Text></View>
             <Text style={styles.chevron}>›</Text>
           </TouchableOpacity>
         ))}
@@ -304,46 +309,45 @@ function ExploreScreen({ go }: { go: (s: Screen) => void }) {
   );
 }
 
-function CompareScreen() {
-  return (
-    <ScrollView contentContainerStyle={styles.page}>
-      <AppHeader title="Compare" subtitle="Your recent comparison results" />
-      <View style={styles.compareSummary}>
-        <Text style={styles.compareSummaryLabel}>Potential demo savings</Text>
-        <Text style={styles.compareSummaryValue}>AED 43.50</Text>
-        <Text style={styles.compareSummaryText}>Across your latest three sample comparisons.</Text>
-      </View>
-      <SectionTitle title="Recent comparisons" />
-      {[
-        ['Big Mac Meal', 'Keeta', 'AED 28.00', 'Save AED 8.50'],
-        ['Almarai Milk 1L', 'Lulu Hypermarket', 'AED 6.75', 'Save AED 0.50'],
-        ['Demo Sneakers', 'Noon', 'AED 219.00', 'Save AED 26.00'],
-      ].map((row) => (
-        <View style={styles.compareRow} key={row[0]}>
-          <View style={{ flex: 1 }}><Text style={styles.compareItem}>{row[0]}</Text><Text style={styles.compareStore}>{row[1]}</Text></View>
-          <View style={{ alignItems: 'flex-end' }}><Text style={styles.comparePrice}>{row[2]}</Text><Text style={styles.saveText}>{row[3]}</Text></View>
-        </View>
-      ))}
-      <Text style={styles.disclaimer}>All values shown on this prototype screen are sample prices for demonstration only.</Text>
-    </ScrollView>
-  );
-}
-
 function DealsScreen() {
+  const [items, setItems] = useState<LiveDeal[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+
+  const refresh = () => {
+    setLoading(true);
+    fetchCurrentDeals()
+      .then((rows) => { setItems(rows); setFailed(false); })
+      .catch(() => { setItems([]); setFailed(true); })
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { refresh(); }, []);
+
   return (
     <ScrollView contentContainerStyle={styles.page}>
-      <AppHeader title="Deals" subtitle="Discounts worth comparing" />
-      <View style={styles.notice}><Text style={styles.noticeText}>Demo Data — offers below are sample content, not live promotions.</Text></View>
-      {deals.map((deal) => (
-        <View key={deal.id} style={styles.dealWide}>
-          <View style={{ flex: 1 }}>
-            {deal.sponsored && <Text style={styles.sponsored}>SPONSORED</Text>}
-            <Text style={styles.dealWideTitle}>{deal.title}</Text>
-            <Text style={styles.dealSource}>{deal.source}</Text>
-          </View>
-          <View style={{ alignItems: 'flex-end' }}><Text style={styles.oldPrice}>{money(deal.original)}</Text><Text style={styles.newPrice}>{money(deal.price)}</Text></View>
+      <AppHeader title="Popular Deals" subtitle="Current promotions across the UAE" showDemo={false} />
+      <View style={styles.notice}><Text style={styles.noticeText}>Live UAE retailer flyers and promotions. Waffer links to the current catalogue; final prices, discount conditions and branch availability are confirmed by the retailer.</Text></View>
+      {loading ? <View style={styles.infoCard}><Text style={styles.infoText}>Loading current UAE promotions…</Text></View> : items.length ? (
+        items.map((deal) => (
+          <TouchableOpacity key={deal.id} style={styles.dealWide} onPress={() => Linking.openURL(deal.url)}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.sponsored}>CURRENT UAE PROMOTION</Text>
+              <Text style={styles.dealWideTitle}>{deal.title}</Text>
+              <Text style={styles.dealSource}>{deal.store}{deal.validFrom ? ` · ${deal.validFrom}` : ''}{deal.validUntil ? ` to ${deal.validUntil}` : ''}</Text>
+              <Text style={styles.dealOpen}>Open flyer ↗</Text>
+            </View>
+          </TouchableOpacity>
+        ))
+      ) : (
+        <View style={styles.infoCard}>
+          <Text style={styles.infoTitle}>{failed ? 'Promotions could not be refreshed' : 'No active promotions found'}</Text>
+          <Text style={styles.infoText}>Open the live UAE catalogue directory to see the latest retailer flyers.</Text>
+          <PrimaryButton label="Browse UAE deals" onPress={() => Linking.openURL('https://ads21.net/ae/')} />
+          <PrimaryButton label="Try again" secondary onPress={refresh} />
         </View>
-      ))}
+      )}
+      <Text style={styles.disclaimer}>Waffer does not invent discount percentages or prices. Check each retailer flyer for exact products, prices, conditions, dates and participating branches.</Text>
     </ScrollView>
   );
 }
@@ -720,14 +724,14 @@ function GroceriesScreen({ go, back, basket, setBasket }: {
 
   return (
     <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
-      <AppHeader title="Groceries" subtitle="Compare UAE supermarket listings" onBack={back} />
+      <AppHeader title="Groceries" subtitle="Browse UAE supermarket listings" onBack={back} />
       <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
         <TextInput style={[styles.bigInput, { flex: 1, marginBottom: 0 }]} placeholder="Search milk, rice, eggs, apples…" value={query} onChangeText={(v) => { setQuery(v); if (v.trim()) setCategory('All'); }} returnKeyType="search" />
         <TouchableOpacity style={[styles.primaryButton, { paddingHorizontal: 14, marginTop: 0 }]} onPress={() => go({ name: 'groceryBasket' })}>
           <Text style={styles.primaryButtonText}>Basket ({basket.reduce((n, x) => n + x.quantity, 0)})</Text>
         </TouchableOpacity>
       </View>
-      <View style={styles.notice}><Text style={styles.noticeText}>LIVE UAE GROCERY SEARCH · Search a generic item to compare available brands and retailer listings. Prices are sorted from lowest to highest.</Text></View>
+      <View style={styles.notice}><Text style={styles.noticeText}>LIVE UAE GROCERY SEARCH · Search a generic item to browse available brands and retailer listings. Prices are sorted from lowest to highest.</Text></View>
       <Text style={styles.sectionTitle}>Browse categories</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }}>
         {GROCERY_CATEGORIES.map((c) => <Pill key={c.label} text={c.label} selected={category === c.label} onPress={() => { setCategory(c.label); setQuery(''); if (c.label === 'All') { setOffers([]); setStatus('idle'); } }} />)}
@@ -797,7 +801,7 @@ function NearbyGroceryMap() {
     <View style={{ gap: 10, marginTop: 8 }}>
       <SectionTitle title="Nearby supermarkets & baqalas" action="Around you" />
       <Text style={styles.helperText}>Allow location access to find nearby supermarkets, grocery shops and convenience stores. Only foreground location is requested. Place data: © OpenStreetMap contributors.</Text>
-      {permission === 'denied' ? <View style={styles.notice}><Text style={styles.noticeText}>Location permission was not granted. Enable location access in your phone settings to see nearby stores. You can still search and compare groceries.</Text></View>
+      {permission === 'denied' ? <View style={styles.notice}><Text style={styles.noticeText}>Location permission was not granted. Enable location access in your phone settings to see nearby stores. You can still search grocery products.</Text></View>
       : permission === 'pending' ? <View style={styles.empty}><Text style={styles.emptyText}>Requesting location permission…</Text></View>
       : region ? <>
         {Platform.OS !== 'web' ? <MapView style={{ height: 280, borderRadius: 18 }} initialRegion={region} showsUserLocation showsMyLocationButton>
@@ -914,7 +918,7 @@ function GenericCategoryScreen({ title, back }: { title: string; back: () => voi
 }
 
 function BottomTabs({ active, onSelect }: { active: TabName; onSelect: (tab: TabName) => void }) {
-  const tabs: TabName[] = ['Home', 'Explore', 'Compare', 'Deals', 'Profile'];
+  const tabs: TabName[] = ['Home', 'Explore', 'Deals', 'Profile'];
   return (
     <View style={styles.tabBar}>
       {tabs.map((tab) => (
@@ -934,9 +938,9 @@ function BasketScreen({ basket, setBasket, go }: { basket: BasketLine[]; setBask
   const restaurantIds = Array.from(new Set(lines.map((line) => line.item!.restaurantId)));
   return (
     <ScrollView contentContainerStyle={styles.page}>
-      <AppHeader title="Your basket" subtitle="Build once, compare the complete basket" />
+      <AppHeader title="Your basket" subtitle="Review your basket and subtotal" />
       <View style={styles.notice}><Text style={styles.noticeText}>Basket prices use demonstration catalogue values, not live platform quotes. Items from different restaurants cannot be combined into one restaurant delivery comparison.</Text></View>
-      {lines.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>Your basket is empty</Text><Text style={styles.emptyText}>Browse a restaurant menu and add meals to compare the basket total.</Text><PrimaryButton label="Browse restaurants" onPress={() => go({ name: 'food' })} /></View> : (
+      {lines.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>Your basket is empty</Text><Text style={styles.emptyText}>Browse a restaurant menu and add meals to your basket.</Text><PrimaryButton label="Browse restaurants" onPress={() => go({ name: 'food' })} /></View> : (
         <>
           {lines.map((line) => <View key={line.lineId} style={styles.listCard}>
             <SampleImage label={line.item!.imageLabel} imageUri={line.item!.imageUri} fallbackIcon={line.item!.fallbackIcon} compact />
@@ -945,7 +949,7 @@ function BasketScreen({ basket, setBasket, go }: { basket: BasketLine[]; setBask
             </View>
           </View>)}
           <View style={styles.infoCard}><Text style={styles.infoTitle}>Basket subtotal</Text><Text style={styles.totalValue}>{money(subtotal)}</Text><Text style={styles.infoText}>{lines.length} line item(s) · {restaurantIds.length} restaurant(s)</Text></View>
-          {restaurantIds.length === 1 ? <PrimaryButton label="Compare complete basket" onPress={() => go({ name: 'basketCompare' })} /> : <View style={styles.notice}><Text style={styles.noticeText}>Your basket contains multiple restaurants. Split it into separate restaurant baskets to compare delivery totals accurately.</Text></View>}
+          <View style={styles.notice}><Text style={styles.noticeText}>Your basket subtotal is shown above. Confirm delivery and service fees in the retailer or delivery app before ordering.</Text></View>
         </>
       )}
     </ScrollView>
@@ -1003,7 +1007,6 @@ export default function App() {
   if (current.name === 'tabs') {
     if (current.tab === 'Home') content = <HomeScreen go={go} />;
     else if (current.tab === 'Explore') content = <ExploreScreen go={go} />;
-    else if (current.tab === 'Compare') content = <CompareScreen />;
     else if (current.tab === 'Deals') content = <DealsScreen />;
     else if (current.tab === 'Basket') content = <BasketScreen basket={basket} setBasket={setBasket} go={go} />;
     else content = <ProfileScreen darkMode={darkMode} onDarkModeChange={setDarkMode} />;
@@ -1069,6 +1072,8 @@ function createStyles(colors: ThemeColors) {
   dealCard: { width: 220, minHeight: 138, backgroundColor: colors.surface, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: colors.line },
   sponsored: { color: colors.amber, fontSize: 9, fontWeight: '900', letterSpacing: 0.8, marginBottom: 5 },
   dealTitle: { color: colors.ink, fontSize: 16, fontWeight: '900' },
+  dealValidity: { color: activeColors.greenDark, fontSize: 11, fontWeight: '700', marginTop: 8 },
+  dealOpen: { color: activeColors.green, fontSize: 12, fontWeight: '900', marginTop: 8 },
   dealSource: { color: colors.muted, fontSize: 11, marginTop: 5 },
   priceLine: { flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 12 },
   oldPrice: { color: colors.muted, textDecorationLine: 'line-through', fontSize: 12 },

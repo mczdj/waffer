@@ -226,6 +226,116 @@ async function fetchNearby(lat, lon) {
   return value;
 }
 
+
+const dealsCache = { t: 0, v: null };
+const DEALS_CACHE_MS = 15 * 60 * 1000;
+
+function decodeHtml(value) {
+  return String(value || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&#8211;|&ndash;/gi, '–')
+    .replace(/&#8217;|&rsquo;/gi, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseFlyerDates(text) {
+  const months = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+  const monthPattern = 'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec';
+  let match = text.match(new RegExp(`(\\d{1,2})\\s+(${monthPattern})\\s*[–-]\\s*(\\d{1,2})\\s+(${monthPattern}),?\\s*(20\\d{2})`, 'i'));
+  let from, until;
+  if (match) {
+    const year = Number(match[5]);
+    from = new Date(Date.UTC(year, months[match[2].toLowerCase()], Number(match[1])));
+    until = new Date(Date.UTC(year, months[match[4].toLowerCase()], Number(match[3])));
+  } else {
+    match = text.match(/(\d{1,2})[./](\d{1,2})[./](20\d{2})\s*[–-]\s*(\d{1,2})[./](\d{1,2})[./](20\d{2})/);
+    if (!match) return null;
+    from = new Date(Date.UTC(Number(match[3]), Number(match[2]) - 1, Number(match[1])));
+    until = new Date(Date.UTC(Number(match[6]), Number(match[5]) - 1, Number(match[4])));
+  }
+  const fmt = (date) => date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  return { from, until, validFrom: fmt(from), validUntil: fmt(until) };
+}
+
+function fallbackCurrentDeals() {
+  const rows = [
+    { id: 'lulu-seafood-2026', title: 'LuLu Hypermarket · Seafood Fest · Abu Dhabi & Al Ain', store: 'LuLu Hypermarket', url: 'https://ads21.net/ae/lulu-hypermarket/seafood-fest-abu-dhabi-al-ain-from-friday-20-nov-2026-6029095/', from: '2026-11-20', until: '2026-11-26' },
+    { id: 'lulu-black-friday-2026', title: 'LuLu Hypermarket · Black Friday', store: 'LuLu Hypermarket', url: 'https://ads21.net/ae/lulu-hypermarket/black-friday-from-thursday-19-nov-2026-6029096/', from: '2026-11-19', until: '2026-12-03' },
+    { id: 'nesto-mom-baby-2026', title: 'Nesto · Mom & Baby', store: 'Nesto', url: 'https://ads21.net/ae/nesto/mom-baby-from-tuesday-17-nov-2026-6029085/', from: '2026-11-17', until: '2026-12-03' },
+    { id: 'day-to-day-christmas-2026', title: 'Day To Day · Christmas catalogue', store: 'Day To Day', url: 'https://ads21.net/ae/day-to-day/christmas-from-tuesday-17-nov-2026-6029057/', from: '2026-11-17', until: '2026-12-31' },
+  ];
+  const today = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Dubai' }));
+  const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  return rows.filter((row) => row.until >= iso).map((row) => ({
+    id: row.id, title: row.title, store: row.store, url: row.url,
+    validFrom: row.from, validUntil: row.until, source: 'ADS21 UAE catalogue (cached fallback)',
+  }));
+}
+
+async function fetchCurrentDeals() {
+  if (dealsCache.v && Date.now() - dealsCache.t < DEALS_CACHE_MS) return dealsCache.v;
+  const pages = ['https://ads21.net/ae/', 'https://ads21.net/ae/groceries/'];
+  const collected = new Map();
+  for (const pageUrl of pages) {
+    try {
+      const response = await fetch(pageUrl, {
+        headers: { 'user-agent': 'Mozilla/5.0 (compatible; WafferDeals/1.0)', accept: 'text/html' },
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!response.ok) continue;
+      const markup = await response.text();
+      const anchorPattern = /<a\b([^>]*)href=["']([^"']+)["']([^>]*)>([\s\S]*?)<\/a>/gi;
+      let match;
+      while ((match = anchorPattern.exec(markup)) !== null) {
+        const href = match[2];
+        if (!/\/ae\/[^/]+\/[^/]+/.test(href) || /\/(category|tag|page)\//i.test(href)) continue;
+        const attributes = `${match[1]} ${match[3]}`;
+        const titleAttr = (attributes.match(/\btitle=["']([^"']+)["']/i) || [])[1] || '';
+        const altAttr = (attributes.match(/\balt=["']([^"']+)["']/i) || [])[1] || '';
+        const innerAlt = (match[4].match(/\balt=["']([^"']+)["']/i) || [])[1] || '';
+        const title = decodeHtml(match[4]) || decodeHtml(titleAttr) || decodeHtml(altAttr) || decodeHtml(innerAlt);
+        const dateInfo = parseFlyerDates(`${title} ${decodeHtml(titleAttr)} ${decodeHtml(altAttr)} ${decodeHtml(innerAlt)}`);
+        if (!title || !dateInfo) continue;
+        const today = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Dubai' }));
+        const todayStart = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+        if (dateInfo.until < todayStart) continue;
+        const url = safeHttpUrl(new URL(href, pageUrl).toString());
+        if (!url || !url.includes('ads21.net/ae/')) continue;
+        const pathParts = new URL(url).pathname.split('/').filter(Boolean);
+        const retailerSlug = pathParts[1] || 'UAE retailer';
+        const store = retailerSlug.split('-').map((word) => word ? word[0].toUpperCase() + word.slice(1) : '').join(' ');
+        const id = url.split('/').filter(Boolean).pop();
+        collected.set(url, {
+          id: String(id || collected.size),
+          title: title.slice(0, 150),
+          store,
+          url,
+          validFrom: dateInfo.validFrom,
+          validUntil: dateInfo.validUntil,
+          source: 'ADS21 UAE catalogue',
+        });
+      }
+    } catch (error) {
+      console.warn(`Waffer deals source unavailable (${new URL(pageUrl).pathname}): ${error.message}`);
+    }
+  }
+  let deals = [...collected.values()]
+    .sort((a, b) => new Date(a.validUntil) - new Date(b.validUntil))
+    .slice(0, 30);
+  if (!deals.length) deals = fallbackCurrentDeals();
+  const value = { deals, source: 'ADS21 UAE retailer catalogues', updatedAt: new Date().toISOString() };
+  dealsCache.t = Date.now();
+  dealsCache.v = value;
+  return value;
+}
+
 function send(res, status, payload) {
   res.statusCode = status;
   res.end(JSON.stringify(payload));
@@ -249,6 +359,25 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const u = new URL(req.url, 'http://localhost');
     if (u.pathname === '/health') return send(res, 200, { ok: true, service: 'waffer-shopping-api' });
     try {
+      if (u.pathname === '/deals') {
+        try {
+          const result = await fetchCurrentDeals();
+          return send(res, 200, result);
+        } catch (error) {
+          console.error('Waffer deals refresh failed; serving dated UAE catalogue fallback:', error.stack || error.message);
+          const deals = fallbackCurrentDeals();
+          const result = {
+            deals,
+            source: 'ADS21 UAE catalogue (fallback)',
+            updatedAt: new Date().toISOString(),
+            stale: true,
+          };
+          // Cache the fallback briefly to avoid repeatedly hitting an unavailable source.
+          dealsCache.t = Date.now();
+          dealsCache.v = result;
+          return send(res, 200, result);
+        }
+      }
       if (u.pathname === '/offers') {
         const q = (u.searchParams.get('q') ?? '').trim().slice(0, 100);
         if (q.length < 2) return send(res, 400, { error: 'Search query must contain at least 2 characters.' });
@@ -265,7 +394,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
         if (!/^\d{5,30}$/.test(productId)) return send(res, 400, { error: 'A valid Google Shopping product_id is required.' });
         return send(res, 200, await fetchProduct(productId));
       }
-      return send(res, 404, { error: 'Not found. Use /health, /offers?q=term, /product?product_id=ID or /nearby?lat=..&lon=.. .' });
+      return send(res, 404, { error: 'Not found. Use /health, /deals, /offers?q=term, /product?product_id=ID or /nearby?lat=..&lon=.. .' });
     } catch (error) {
       const pathname = new URL(req.url, 'http://localhost').pathname;
       if (pathname === '/nearby') {
