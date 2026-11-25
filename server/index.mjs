@@ -127,14 +127,43 @@ async function fetchNearby(lat, lon) {
   const hit = nearbyCache.get(cacheKey);
   if (hit && Date.now() - hit.t < 30 * 60 * 1000) return hit.v;
   const query = `[out:json][timeout:25];(node(around:5000,${lat},${lon})[shop~"supermarket|convenience|greengrocer|general|grocery|food"];way(around:5000,${lat},${lon})[shop~"supermarket|convenience|greengrocer|general|grocery|food"];relation(around:5000,${lat},${lon})[shop~"supermarket|convenience|greengrocer|general|grocery|food"];);out center tags 80;`;
-  const response = await fetch('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-    body: `data=${encodeURIComponent(query)}`,
-    signal: AbortSignal.timeout(28000),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !Array.isArray(payload.elements)) throw new Error('Nearby places provider is temporarily unavailable.');
+  // Public Overpass instances are best-effort and can be unreachable from
+  // some hosting networks. Try independent global/Asia endpoints in sequence.
+  const overpassEndpoints = [
+    'https://overpass.private.coffee/api/interpreter',
+    'https://overpass-api.de/api/interpreter',
+    'https://ovp.dresel.systems/api-as/interpreter',
+  ];
+  let payload = null;
+  const providerErrors = [];
+  for (const endpoint of overpassEndpoints) {
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded;charset=UTF-8',
+          'user-agent': 'WafferUniversityProject/1.0 (nearby grocery finder)',
+          'accept': 'application/json',
+        },
+        body: `data=${encodeURIComponent(query)}`,
+        signal: AbortSignal.timeout(18000),
+      });
+      const body = await response.text();
+      let parsed;
+      try { parsed = JSON.parse(body); } catch { parsed = null; }
+      if (!response.ok || !parsed || !Array.isArray(parsed.elements)) {
+        providerErrors.push(`${new URL(endpoint).hostname}: HTTP ${response.status}`);
+        continue;
+      }
+      payload = parsed;
+      break;
+    } catch (error) {
+      providerErrors.push(`${new URL(endpoint).hostname}: ${error.message}`);
+    }
+  }
+  if (!payload) {
+    throw new Error(`All nearby map providers failed (${providerErrors.join(' | ')})`);
+  }
   const distanceKm = (a, b) => {
     const rad = (v) => v * Math.PI / 180;
     const dLat = rad(a.lat - lat), dLon = rad(a.lon - lon);
@@ -203,7 +232,12 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       }
       return send(res, 404, { error: 'Not found. Use /health, /offers?q=term, /product?product_id=ID or /nearby?lat=..&lon=.. .' });
     } catch (error) {
-      console.error('Waffer API error:', error.message);
+      const pathname = new URL(req.url, 'http://localhost').pathname;
+      if (pathname === '/nearby') {
+        console.error('Waffer nearby API error:', error.stack || error.message);
+        return send(res, 502, { error: 'Nearby supermarket data is temporarily unavailable. Please try again shortly.' });
+      }
+      console.error('Waffer API error:', error.stack || error.message);
       return send(res, 502, { error: 'The shopping provider could not complete this request. Please try again shortly.' });
     }
 }).listen(PORT, '0.0.0.0', () => {
