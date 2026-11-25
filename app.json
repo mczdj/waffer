@@ -9,14 +9,15 @@
     "icon": "./assets/Wafeer.png",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.university.wafferdemo"
+      "bundleIdentifier": "com.waffer.uae"
     },
     "android": {
-      "package": "com.university.wafferdemo",
+      "package": "com.waffer.uae",
       "adaptiveIcon": {
         "foregroundImage": "./assets/Wafeer.png",
         "backgroundColor": "#F8F4EA"
-      }
+      },
+      "versionCode": 1
     },
     "extra": {
       "eas": {
@@ -31,6 +32,11 @@
           "locationWhenInUsePermission": "Waffer uses your location to show nearby supermarkets and baqalas."
         }
       ]
-    ]
+    ],
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/Wafeer.png"
+    }
   }
 }

@@ -4,8 +4,19 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_OFFERS_API_URL": "https://waffer-api-3rvu.onrender.com"
       }
     },
-    "production": {}
+    "production": {
+      "autoIncrement": true,
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_OFFERS_API_URL": "https://waffer-api-3rvu.onrender.com"
+      }
+    }
   }
 }

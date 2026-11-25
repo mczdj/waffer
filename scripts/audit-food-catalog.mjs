@@ -6,7 +6,7 @@ const items = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
 const restaurants = new Map();
 const providers = new Map();
 let verifiedPrices = 0;
-let demoPrices = 0;
+let indicativePrices = 0;
 let imageErrors = 0;
 let priceErrors = 0;
 let duplicateIds = 0;
@@ -36,9 +36,9 @@ for (const item of items) {
     } else if (offer.priceStatus === 'verified') {
       verifiedPrices += 1;
       if (!offer.sourceUrl || !offer.lastVerifiedAt || !offer.sourceLabel) priceErrors += 1;
-    } else if (offer.priceStatus === 'demo') {
-      demoPrices += 1;
-      if (!offer.sourceLabel || !/simulat|demo/i.test(offer.sourceLabel)) priceErrors += 1;
+    } else if (offer.priceStatus === 'indicative') {
+      indicativePrices += 1;
+      if (!offer.sourceLabel || !/indicative|estimate/i.test(offer.sourceLabel)) priceErrors += 1;
     } else {
       priceErrors += 1;
     }
@@ -49,7 +49,7 @@ console.log(`Menu items: ${items.length}`);
 console.log(`Restaurant brands: ${restaurants.size}`);
 console.log('Items by restaurant:', Object.fromEntries(restaurants));
 console.log(`Verified price rows: ${verifiedPrices}`);
-console.log(`Simulated demo price rows: ${demoPrices}`);
+console.log(`Indicative estimate price rows: ${indicativePrices}`);
 console.log('Price rows by provider:', Object.fromEntries(providers));
 console.log(`Image provenance errors: ${imageErrors}`);
 console.log(`Price/data errors: ${priceErrors}`);

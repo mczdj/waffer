@@ -17,8 +17,8 @@ export type PlatformPrice = {
   sourceUrl?: string;
   /** Date the listing was checked by the project maintainer (YYYY-MM-DD). */
   lastVerifiedAt?: string;
-  /** verified = sourced menu price; demo = simulated price for university feature testing. */
-  priceStatus?: 'verified' | 'demo';
+  /** verified = sourced menu price; indicative = illustrative estimate that is not a live provider quote. */
+  priceStatus?: 'verified' | 'indicative';
   sourceLabel?: string;
 };
 

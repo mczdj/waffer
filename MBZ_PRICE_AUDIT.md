@@ -1,8 +1,8 @@
-# Waffer Food price audit — university demo
+# Waffer Food price audit
 
 **Target area:** Mohamed Bin Zayed City, Abu Dhabi, UAE  
 **Catalogue snapshot:** 24 November 2026  
-**Important:** VERIFIED values are sourced menu/listing prices. DEMO values are simulated comparison data for university testing only; they are not live platform quotes.
+**Important:** VERIFIED values are sourced menu/listing prices. INDICATIVE values are illustrative estimates, not live platform quotes.
 
 ## Verified menu prices
 
@@ -34,16 +34,16 @@
 | Papa Johns | Butter Chicken – Small 8 inch | [Papa Johns UAE Menu](https://www.papajohns.ae/menu) | AED 34.00 | Official UAE menu; branch-specific price not established |
 | Papa Johns | Chicken Super Papa's – Small 8 inch | [Papa Johns UAE Menu](https://www.papajohns.ae/menu) | AED 34.00 | Official UAE menu; branch-specific price not established |
 
-## Simulated comparison prices
+## Indicative price estimates
 
-Every DEMO row is visibly labelled in the app. The values are seeded sample data to let the instructor test sorting, best-price highlighting, comparison cards and provider navigation. They are not scraped or verified platform offers.
+Every INDICATIVE row is labelled in the app. These illustrative values support price sorting and provider navigation, but are not scraped or verified platform offers.
 
-| Platform | What it means in this prototype |
+| Platform | What it means in this catalogue |
 |---|---|
-| Talabat | Simulated comparison offer where labelled DEMO |
-| Keeta | Simulated comparison offer where labelled DEMO |
-| Smiles | Simulated comparison offer where labelled DEMO |
-| Deliveroo | Simulated comparison offer where labelled DEMO |
+| Talabat | Indicative estimate where labelled INDICATIVE |
+| Keeta | Indicative estimate where labelled INDICATIVE |
+| Smiles | Indicative estimate where labelled INDICATIVE |
+| Deliveroo | Indicative estimate where labelled INDICATIVE |
 
 ## Source listing URLs
 
@@ -57,7 +57,7 @@ Every DEMO row is visibly labelled in the app. The values are seeded sample data
 
 ## Important limitations
 
-- DEMO prices are not actual provider quotes and must not be used to place orders.
+- INDICATIVE prices are not actual provider quotes and must not be used to place orders.
 - Official UAE menu prices may differ from the selected MBZ branch or delivery channel.
 - Delivery fees, service fees, discounts and checkout totals are not included in comparisons.
 - Waffer opens provider listings/searches; it does not transfer basket contents or complete checkout.

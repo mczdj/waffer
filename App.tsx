@@ -15,19 +15,17 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
-import MapView, { Marker, Callout, Region } from 'react-native-maps';
 import { darkColors, lightColors, radius, ThemeColors } from './src/theme';
 import { groceries, menuItems, restaurants, shoes } from './src/data';
 import { Grocery, MenuItem, PlatformPrice, Shoe } from './src/types';
 import { buildStoreSearchUrl, openLocationSearch, openOffer } from './src/utils/offerNavigation';
 
-type TabName = 'Home' | 'Explore' | 'Deals' | 'Basket' | 'Profile';
+type TabName = 'Home' | 'Explore' | 'Deals' | 'Profile';
 type Screen =
   | { name: 'tabs'; tab: TabName }
   | { name: 'food' }
   | { name: 'menu'; restaurantId: string }
   | { name: 'foodCompare'; itemId: string; quantity: number; option: string }
-  | { name: 'basketCompare' }
   | { name: 'shoes' }
   | { name: 'shoeResults'; filters: ShoeFilters }
   | { name: 'shopping' }
@@ -36,8 +34,8 @@ type Screen =
   | { name: 'groceryBasket' }
   | { name: 'category'; title: string };
 
-type BasketLine = { lineId: string; itemId: string; quantity: number; option: string; note: string; unitPrice: number };
 type GroceryBasketLine = { id: string; title: string; store: string; price: number; priceText: string; link: string; image: string | null; quantity: number };
+type Region = { latitude: number; longitude: number; latitudeDelta: number; longitudeDelta: number };
 type NearbyGroceryPlace = { id: string; name: string; lat: number; lon: number; category: string; address: string; phone: string | null; website: string | null; distance?: number };
 
 type ShoeFilters = {
@@ -65,7 +63,7 @@ const finalPlatformTotal = (p: PlatformPrice, qty = 1) =>
 let activeColors = lightColors;
 let styles = createStyles(activeColors);
 
-function AppHeader({ title, subtitle, onBack, showDemo = true }: { title: string; subtitle?: string; onBack?: () => void; showDemo?: boolean }) {
+function AppHeader({ title, subtitle, onBack }: { title: string; subtitle?: string; onBack?: () => void }) {
   return (
     <View style={styles.headerRow}>
       {onBack ? (
@@ -81,7 +79,6 @@ function AppHeader({ title, subtitle, onBack, showDemo = true }: { title: string
         <Text style={styles.headerTitle}>{title}</Text>
         {!!subtitle && <Text style={styles.headerSubtitle}>{subtitle}</Text>}
       </View>
-      {showDemo && <View style={styles.demoChip}><Text style={styles.demoChipText}>DEMO</Text></View>}
     </View>
   );
 }
@@ -326,7 +323,7 @@ function DealsScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.page}>
-      <AppHeader title="Popular Deals" subtitle="Current promotions across the UAE" showDemo={false} />
+      <AppHeader title="Popular Deals" subtitle="Current promotions across the UAE" />
       <View style={styles.notice}><Text style={styles.noticeText}>Live UAE retailer flyers and promotions. Waffer links to the current catalogue; final prices, discount conditions and branch availability are confirmed by the retailer.</Text></View>
       {loading ? <View style={styles.infoCard}><Text style={styles.infoText}>Loading current UAE promotions…</Text></View> : items.length ? (
         items.map((deal) => (
@@ -352,36 +349,65 @@ function DealsScreen() {
   );
 }
 
-function ProfileScreen({ darkMode, onDarkModeChange }: { darkMode: boolean; onDarkModeChange: (value: boolean) => void }) {
-  const [priceDrops, setPriceDrops] = useState(true);
-  const [dealAlerts, setDealAlerts] = useState(true);
+const UAE_LOCATION_OPTIONS = [
+  'Mohammed Bin Zayed City, Abu Dhabi',
+  'Khalifa City, Abu Dhabi',
+  'Mussafah, Abu Dhabi',
+  'Abu Dhabi City',
+  'Al Reem Island, Abu Dhabi',
+  'Yas Island, Abu Dhabi',
+  'Al Ain',
+  'Dubai Marina, Dubai',
+  'Downtown Dubai',
+  'Deira, Dubai',
+  'Sharjah City',
+];
+
+function ProfileScreen({ darkMode, onDarkModeChange, selectedLocation, onLocationChange }: {
+  darkMode: boolean; onDarkModeChange: (value: boolean) => void;
+  selectedLocation: string; onLocationChange: (value: string) => void;
+}) {
+  const [showLocations, setShowLocations] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [locationError, setLocationError] = useState('');
+  const useDeviceLocation = async () => {
+    setLocating(true); setLocationError('');
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (permission.status !== 'granted') throw new Error('Location permission was not granted. You can choose an area manually instead.');
+      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      onLocationChange('Current device location');
+      setShowLocations(false);
+    } catch (error: any) { setLocationError(error?.message || 'Could not detect your location.'); }
+    finally { setLocating(false); }
+  };
   return (
     <ScrollView contentContainerStyle={styles.page}>
-      <AppHeader title="Profile" subtitle="Your shopping preferences" />
+      <AppHeader title="Profile" subtitle="Your Waffer preferences" />
       <View style={styles.profileCard}>
-        <View style={styles.avatar}><Text style={styles.avatarText}>WS</Text></View>
-        <View><Text style={styles.profileName}>Waffer Student</Text><Text style={styles.profileSub}>University demo profile</Text></View>
+        <View style={styles.avatar}><Text style={styles.avatarText}>W</Text></View>
+        <View><Text style={styles.profileName}>Waffer User</Text><Text style={styles.profileSub}>Food · Shopping · Groceries</Text></View>
       </View>
-      <SectionTitle title="Preferences" />
-      {[
-        ['Preferred shoe size', '42 EU'],
-        ['Preferred stores', 'Noon, Carrefour, Lulu'],
-        ['Favourite brands', 'Nike, Adidas'],
-      ].map(([k, v]) => <View style={styles.settingRow} key={k}><Text style={styles.settingLabel}>{k}</Text><Text style={styles.settingValue}>{v}</Text></View>)}
+      <SectionTitle title="Current location" />
+      <View style={styles.infoCard}>
+        <Text style={styles.infoTitle}>📍 {selectedLocation}</Text>
+        <Text style={styles.infoText}>Choose the area you want Waffer to use when finding nearby supermarkets and local options.</Text>
+        <PrimaryButton label={locating ? 'Detecting location…' : 'Use my device location'} onPress={useDeviceLocation} />
+        <PrimaryButton label={showLocations ? 'Hide location list' : 'Choose an area manually'} onPress={() => setShowLocations((value) => !value)} secondary />
+        {!!locationError && <Text style={styles.helperText}>{locationError}</Text>}
+        {showLocations && <View style={{ gap: 7, marginTop: 10 }}>
+          {UAE_LOCATION_OPTIONS.map((area) => <TouchableOpacity key={area} onPress={() => { onLocationChange(area); setShowLocations(false); }} style={[styles.settingRow, selectedLocation === area && { borderColor: activeColors.green, borderWidth: 1 }]}>
+            <Text style={styles.settingLabel}>{area}</Text><Text style={{ color: activeColors.green, fontWeight: '900' }}>{selectedLocation === area ? '✓' : '›'}</Text>
+          </TouchableOpacity>)}
+        </View>}
+      </View>
       <SectionTitle title="Appearance" />
       <View style={styles.settingRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.settingLabel}>Dark mode</Text>
-          <Text style={styles.settingHint}>{darkMode ? 'Dark theme is on' : 'Light theme is on'}</Text>
-        </View>
+        <View style={{ flex: 1 }}><Text style={styles.settingLabel}>Dark mode</Text><Text style={styles.settingHint}>{darkMode ? 'Dark theme is on' : 'Light theme is on'}</Text></View>
         <Switch value={darkMode} onValueChange={onDarkModeChange} trackColor={{ false: activeColors.line, true: activeColors.greenSoft }} thumbColor={darkMode ? activeColors.green : '#B8C2BD'} />
       </View>
-      <SectionTitle title="Notifications" />
-      <View style={styles.settingRow}><Text style={styles.settingLabel}>Price-drop alerts</Text><Switch value={priceDrops} onValueChange={setPriceDrops} trackColor={{ true: activeColors.greenSoft }} thumbColor={priceDrops ? activeColors.green : '#ccc'} /></View>
-      <View style={styles.settingRow}><Text style={styles.settingLabel}>New deal alerts</Text><Switch value={dealAlerts} onValueChange={setDealAlerts} trackColor={{ true: activeColors.greenSoft }} thumbColor={dealAlerts ? activeColors.green : '#ccc'} /></View>
-      <SectionTitle title="Saved" />
-      <View style={styles.infoCard}><Text style={styles.infoTitle}>4 favourite products</Text><Text style={styles.infoText}>Saved locally for this prototype.</Text></View>
-      <View style={styles.infoCard}><Text style={styles.infoTitle}>3 saved comparisons</Text><Text style={styles.infoText}>Ready to revisit during the demo.</Text></View>
+      <SectionTitle title="About Waffer" />
+      <View style={styles.infoCard}><Text style={styles.infoTitle}>One place for everyday choices</Text><Text style={styles.infoText}>Discover restaurants, browse UAE grocery listings, explore shopping products and check current retailer promotions.</Text><Text style={styles.sampleTiny}>UAE · Food, Shopping & Groceries</Text></View>
     </ScrollView>
   );
 }
@@ -389,7 +415,7 @@ function ProfileScreen({ darkMode, onDarkModeChange }: { darkMode: boolean; onDa
 function FoodScreen({ go, back }: { go: (s: Screen) => void; back: () => void }) {
   return (
     <ScrollView contentContainerStyle={styles.page}>
-      <AppHeader title="Food comparison" subtitle="Choose a restaurant" onBack={back} />
+      <AppHeader title="Food" subtitle="Choose a restaurant" onBack={back} />
       <View style={styles.notice}><Text style={styles.noticeText}>{restaurants.length} restaurants · {menuItems.length} menu items with product photos and price comparisons. Verified and simulated offers are labelled separately.</Text></View>
       {restaurants.map((r) => (
         <View key={r.id}>
@@ -397,7 +423,7 @@ function FoodScreen({ go, back }: { go: (s: Screen) => void; back: () => void })
             <RestaurantLogo name={r.name} logoUri={r.logoUri} />
             <View style={{ flex: 1 }}>
               <Text style={styles.restaurantCuisine}>{r.cuisine}</Text>
-              <Text style={styles.compareHint}>Compare listed item prices</Text>
+              <Text style={styles.compareHint}>View available prices</Text>
             </View>
             <Text style={styles.chevron}>›</Text>
           </TouchableOpacity>
@@ -417,8 +443,8 @@ function BestOfferLine({ item }: { item: MenuItem }) {
           <Text style={[styles.menuPrice, { marginTop: 0, color: index === 0 ? activeColors.greenDark : activeColors.ink, flexShrink: 1 }]}>
             {p.platform} · {money(p.itemPrice)}
           </Text>
-          <Text style={{ fontSize: 9, fontWeight: '900', color: p.priceStatus === 'demo' ? activeColors.amber : activeColors.greenDark }}>
-            {p.priceStatus === 'demo' ? 'DEMO' : 'VERIFIED'}
+          <Text style={{ fontSize: 9, fontWeight: '900', color: p.priceStatus === 'indicative' ? activeColors.amber : activeColors.greenDark }}>
+            {p.priceStatus === 'indicative' ? 'INDICATIVE' : 'VERIFIED'}
           </Text>
         </View>
       ))}
@@ -436,7 +462,7 @@ function MenuScreen({ restaurantId, go, back }: { restaurantId: string; go: (s: 
   return (
     <ScrollView contentContainerStyle={styles.page}>
       <AppHeader title={restaurant?.name ?? 'Restaurant'} subtitle="Explore the menu · MBZ City, Abu Dhabi" onBack={back} />
-      <View style={styles.notice}><Text style={styles.noticeText}>MOHAMED BIN ZAYED CITY UNIVERSITY DEMO · Real menu prices are labelled VERIFIED; simulated comparison offers are labelled DEMO. Prices and branch availability can change.</Text></View>
+      <View style={styles.notice}><Text style={styles.noticeText}>Menu prices marked VERIFIED are sourced from linked listings. INDICATIVE prices are illustrative estimates and may differ from current provider prices. Prices and branch availability can change.</Text></View>
       <TextInput style={styles.bigInput} placeholder={`Search ${restaurant?.name ?? 'menu'}...`} value={query} onChangeText={setQuery} />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>{menuCategories.map((x) => <Pill key={x} text={x} selected={category === x} onPress={() => setCategory(x)} />)}</ScrollView>
       {items.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>No menu items found</Text><Text style={styles.emptyText}>Try another search or menu category.</Text></View> : items.map((item) => (
@@ -446,12 +472,12 @@ function MenuScreen({ restaurantId, go, back }: { restaurantId: string; go: (s: 
           <Text style={styles.chevron}>›</Text>
         </TouchableOpacity>
       ))}
-      <Text style={styles.disclaimer}>Price comparison is for university demonstration. VERIFIED means the price was found on the linked menu/listing. DEMO means the provider price is simulated for testing and is not a live offer. All prices are item prices only; delivery fees, service fees, discounts and checkout totals are not included.</Text>
+      <Text style={styles.disclaimer}>VERIFIED means the price was found on the linked menu or listing. INDICATIVE means the amount is an illustrative estimate, not a live provider quote. Prices are item prices only; delivery fees, service fees, discounts and checkout totals are not included.</Text>
     </ScrollView>
   );
 }
 
-function FoodCompareScreen({ itemId, quantity, option, back, setBasket, go }: { itemId: string; quantity: number; option: string; back: () => void; setBasket: React.Dispatch<React.SetStateAction<BasketLine[]>>; go: (screen: Screen) => void }) {
+function FoodCompareScreen({ itemId, quantity, option, back }: { itemId: string; quantity: number; option: string; back: () => void }) {
   const item = menuItems.find((x) => x.id === itemId);
   if (!item) return <SafeAreaView style={styles.safe}><Text>Item not found.</Text></SafeAreaView>;
   const ranked = [...item.prices].sort((a, b) => a.itemPrice - b.itemPrice);
@@ -460,8 +486,8 @@ function FoodCompareScreen({ itemId, quantity, option, back, setBasket, go }: { 
   const saving = cheapest && expensive ? (expensive.itemPrice - cheapest.itemPrice) * quantity : 0;
   return (
     <ScrollView contentContainerStyle={styles.page}>
-      <AppHeader title="Price comparison" subtitle={`${item.name} · ${option} · Qty ${quantity}`} onBack={back} />
-      <View style={styles.notice}><Text style={styles.noticeText}>Offers are sorted from lowest to highest item price. VERIFIED = sourced menu price. DEMO = simulated provider price for university testing, not a live offer. Delivery and service fees are not included.</Text></View>
+      <AppHeader title="Available price options" subtitle={`${item.name} · ${option} · Qty ${quantity}`} onBack={back} />
+      <View style={styles.notice}><Text style={styles.noticeText}>Offers are sorted from lowest to highest item price. VERIFIED prices are sourced menu prices; INDICATIVE prices are illustrative estimates rather than live provider quotes. Delivery and service fees are not included.</Text></View>
       {ranked.map((p, index) => {
                 return (
           <View key={p.id} style={[styles.platformCard, index === 0 && styles.bestCard]}>
@@ -470,19 +496,13 @@ function FoodCompareScreen({ itemId, quantity, option, back, setBasket, go }: { 
               {index === 0 && <View style={styles.bestBadge}><Text style={styles.bestBadgeText}>LOWEST LISTED</Text></View>}
             </View>
             <View style={styles.totalLine}><Text style={styles.totalLabel}>Item price × {quantity}</Text><Text style={styles.totalValue}>{money(p.itemPrice * quantity)}</Text></View>
-            <Text style={styles.helperText}>{p.priceStatus === 'demo' ? 'DEMO PRICE · simulated for university testing; not a live provider offer.' : `${p.sourceLabel ?? 'Verified menu listing'} · item price only.`}</Text>
-            <PrimaryButton label={p.priceStatus === 'demo' ? `Search ${item.name} on ${p.platform} ↗` : `Open verified ${p.platform} listing ↗`} onPress={() => openOffer({ label: p.platform, webUrl: p.priceStatus === 'demo' ? buildStoreSearchUrl(item.name, p.platform) : (p.sourceUrl ?? p.url), fallbackUrl: p.url, appUrl: p.appUrl })} secondary={index !== 0} />
+            <Text style={styles.helperText}>{p.priceStatus === 'indicative' ? 'INDICATIVE PRICE · illustrative estimate, not a live provider quote.' : `${p.sourceLabel ?? 'Verified menu listing'} · item price only.`}</Text>
+            <PrimaryButton label={p.priceStatus === 'indicative' ? `Search ${item.name} on ${p.platform} ↗` : `Open verified ${p.platform} listing ↗`} onPress={() => openOffer({ label: p.platform, webUrl: p.priceStatus === 'indicative' ? buildStoreSearchUrl(item.name, p.platform) : (p.sourceUrl ?? p.url), fallbackUrl: p.url, appUrl: p.appUrl })} secondary={index !== 0} />
           </View>
         );
       })}
-      {cheapest && <PrimaryButton label={`Open lowest listed provider · ${cheapest.platform}`} onPress={() => openOffer({ label: cheapest.platform, webUrl: cheapest.priceStatus === 'demo' ? buildStoreSearchUrl(item.name, cheapest.platform) : (cheapest.sourceUrl ?? cheapest.url), fallbackUrl: cheapest.url, appUrl: cheapest.appUrl })} />}
-      <View style={styles.savingResult}><Text style={styles.savingResultLabel}>Lowest-to-highest price difference</Text><Text style={styles.savingResultValue}>{money(saving)}</Text><Text style={styles.savingResultText}>difference between the highest and lowest listed item prices; demo offers are simulated.</Text></View>
-      <PrimaryButton label="Add lowest listed price to basket" onPress={() => setBasket((old) => {
-        const existing = old.find((line) => line.itemId === item.id && line.option === option);
-        if (existing) return old.map((line) => line.lineId === existing.lineId ? { ...line, quantity: line.quantity + quantity } : line);
-        return [...old, { lineId: `${item.id}-${Date.now()}`, itemId: item.id, quantity, option, note: `${cheapest.platform} · ${(cheapest.priceStatus ?? 'demo').toUpperCase()}`, unitPrice: cheapest.itemPrice }];
-      })} />
-      <PrimaryButton label="Open basket" secondary onPress={() => go({ name: 'tabs', tab: 'Basket' })} />
+      {cheapest && <PrimaryButton label={`Open lowest listed provider · ${cheapest.platform}`} onPress={() => openOffer({ label: cheapest.platform, webUrl: cheapest.priceStatus === 'indicative' ? buildStoreSearchUrl(item.name, cheapest.platform) : (cheapest.sourceUrl ?? cheapest.url), fallbackUrl: cheapest.url, appUrl: cheapest.appUrl })} />}
+      <View style={styles.savingResult}><Text style={styles.savingResultLabel}>Lowest-to-highest price difference</Text><Text style={styles.savingResultValue}>{money(saving)}</Text><Text style={styles.savingResultText}>difference between the highest and lowest listed item prices; indicative prices are estimates.</Text></View>
     </ScrollView>
   );
 }
@@ -528,7 +548,7 @@ function ShoeResultsScreen({ filters, back }: { filters: ShoeFilters; back: () =
       <AppHeader title="Matching shoes" subtitle={`${filters.type} · Size ${filters.size} · ${filters.color}`} onBack={back} />
       <View style={styles.wrap}>{(['Cheapest first', 'Best value', 'Highest price'] as const).map((x) => <Pill key={x} text={x} selected={sort === x} onPress={() => setSort(x)} />)}</View>
       {results.length === 0 ? (
-        <View style={styles.empty}><Text style={styles.emptyTitle}>No exact demo match</Text><Text style={styles.emptyText}>Try another colour, brand or a higher budget. Waffer only shows products that match the available sample attributes.</Text></View>
+        <View style={styles.empty}><Text style={styles.emptyTitle}>No exact match found</Text><Text style={styles.emptyText}>Try another colour, brand or a higher budget. Waffer shows products that match the available listing details.</Text></View>
       ) : results.map((s, i) => <ShoeResult key={s.id} shoe={s} best={i === 0} />)}
       <Text style={styles.disclaimer}>Sample Prices — product availability is not claimed or verified in this prototype.</Text>
     </ScrollView>
@@ -691,9 +711,9 @@ const GROCERY_CATEGORIES = [
   { label: 'Pantry', query: 'cooking oil canned food spices' },
 ];
 
-function GroceriesScreen({ go, back, basket, setBasket }: {
+function GroceriesScreen({ go, back, basket, setBasket, selectedLocation }: {
   go: (s: Screen) => void; back: () => void; basket: GroceryBasketLine[];
-  setBasket: React.Dispatch<React.SetStateAction<GroceryBasketLine[]>>;
+  setBasket: React.Dispatch<React.SetStateAction<GroceryBasketLine[]>>; selectedLocation: string;
 }) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('All');
@@ -761,13 +781,13 @@ function GroceriesScreen({ go, back, basket, setBasket }: {
           </View>
         ))}
       </View>}
-      <NearbyGroceryMap />
+      <NearbyGroceryMap selectedLocation={selectedLocation} />
       <Text style={styles.disclaimer}>Prices are provider-returned listing prices, not guaranteed checkout prices. Delivery and service fees may apply and are excluded from the item subtotal unless separately verified. Product availability and retailer links can change.</Text>
     </ScrollView>
   );
 }
 
-function NearbyGroceryMap() {
+function NearbyGroceryMap({ selectedLocation }: { selectedLocation: string }) {
   const [permission, setPermission] = useState<'pending' | 'granted' | 'denied'>('pending');
   const [region, setRegion] = useState<Region | null>(null);
   const [places, setPlaces] = useState<NearbyGroceryPlace[]>([]);
@@ -777,13 +797,23 @@ function NearbyGroceryMap() {
     let active = true;
     (async () => {
       try {
-        const result = await Location.requestForegroundPermissionsAsync();
+        let latitude: number; let longitude: number;
+        if (selectedLocation === 'Current device location') {
+          const result = await Location.requestForegroundPermissionsAsync();
+          if (!active) return;
+          if (result.status !== 'granted') { setPermission('denied'); return; }
+          setPermission('granted');
+          const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          latitude = pos.coords.latitude; longitude = pos.coords.longitude;
+        } else {
+          setPermission('granted');
+          const matches = await Location.geocodeAsync(`${selectedLocation}, UAE`);
+          const match = matches[0];
+          if (!match) throw new Error(`Could not find ${selectedLocation}. Choose another area or use device location.`);
+          latitude = match.latitude; longitude = match.longitude;
+        }
         if (!active) return;
-        if (result.status !== 'granted') { setPermission('denied'); return; }
-        setPermission('granted');
-        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        if (!active) return;
-        const center = { latitude: pos.coords.latitude, longitude: pos.coords.longitude, latitudeDelta: 0.045, longitudeDelta: 0.045 };
+        const center = { latitude, longitude, latitudeDelta: 0.045, longitudeDelta: 0.045 };
         setRegion(center);
         setLoading(true);
         const base = process.env.EXPO_PUBLIC_OFFERS_API_URL;
@@ -796,7 +826,7 @@ function NearbyGroceryMap() {
       finally { if (active) setLoading(false); }
     })();
     return () => { active = false; };
-  }, []);
+  }, [selectedLocation]);
   return (
     <View style={{ gap: 10, marginTop: 8 }}>
       <SectionTitle title="Nearby supermarkets & baqalas" action="Around you" />
@@ -804,13 +834,7 @@ function NearbyGroceryMap() {
       {permission === 'denied' ? <View style={styles.notice}><Text style={styles.noticeText}>Location permission was not granted. Enable location access in your phone settings to see nearby stores. You can still search grocery products.</Text></View>
       : permission === 'pending' ? <View style={styles.empty}><Text style={styles.emptyText}>Requesting location permission…</Text></View>
       : region ? <>
-        {Platform.OS !== 'web' ? <MapView style={{ height: 280, borderRadius: 18 }} initialRegion={region} showsUserLocation showsMyLocationButton>
-          {places.map((place) => <Marker key={place.id} coordinate={{ latitude: place.lat, longitude: place.lon }} title={place.name} description={place.category}>
-            <Callout onPress={() => place.phone ? Linking.openURL(`tel:${place.phone}`) : place.website ? openOffer({ label: place.name, webUrl: place.website }) : openOffer({ label: place.name, webUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name + ' ' + place.address)}` })}>
-              <View style={{ maxWidth: 220, padding: 4 }}><Text style={{ fontWeight: '800' }}>{place.name}</Text><Text>{place.address || place.category}</Text><Text style={{ color: '#176B4D', marginTop: 4 }}>{place.phone ? `Call ${place.phone}` : 'Tap to view store'}</Text></View>
-            </Callout>
-          </Marker>)}
-        </MapView> : <PrimaryButton label="Open nearby groceries in Maps ↗" onPress={() => Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${region.latitude},${region.longitude}+supermarket+grocery`) } />}
+        <PrimaryButton label="Open nearby supermarkets in Maps ↗" onPress={() => Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${region.latitude},${region.longitude}+supermarket+grocery`)} />
         {loading && <Text style={styles.helperText}>Finding nearby shops…</Text>}
         {!!mapError && <Text style={styles.helperText}>{mapError}</Text>}
         {places.slice(0, 12).map((place) => <View key={place.id} style={styles.groceryCard}>
@@ -830,7 +854,7 @@ function GroceryBasketScreen({ basket, setBasket, back }: {
   const subtotal = basket.reduce((sum, line) => sum + line.price * line.quantity, 0);
   const byStore = Object.values(basket.reduce((groups, line) => {
     if (!groups[line.store]) groups[line.store] = { store: line.store, total: 0, count: 0 };
-    groups[line.store].total += line.price * line.quantity; groups[line.store].count += line.quantity; return groups;
+    groups[line.store]!.total += line.price * line.quantity; groups[line.store]!.count += line.quantity; return groups;
   }, {} as Record<string, { store: string; total: number; count: number }>));
   return <ScrollView contentContainerStyle={styles.page}>
     <AppHeader title="Grocery basket" subtitle="Your selected supermarket items" onBack={back} />
@@ -870,16 +894,16 @@ function GroceryCompareScreen({ groceryId, back }: { groceryId: string; back: ()
     <ScrollView contentContainerStyle={styles.page}>
       <AppHeader title="Grocery prices" subtitle={`${item.brand} ${item.name} · ${item.quantity}`} onBack={back} />
       <SampleImage label={item.imageLabel} imageUri={item.imageUri} fallbackIcon={item.fallbackIcon} />
-      <View style={styles.notice}><Text style={styles.noticeText}>Like-for-like demo comparison of the same sample product and quantity.</Text></View>
+      <View style={styles.notice}><Text style={styles.noticeText}>Illustrative like-for-like estimate for the same product and quantity.</Text></View>
       {ranked.map((p, i) => {
         const final = p.price + p.deliveryFee - p.discount;
         return (
           <View key={p.store} style={[styles.platformCard, i === 0 && styles.bestCard]}>
             <View style={styles.platformTop}><BrandBadge name={p.store} icon={p.icon} />{i === 0 && <View style={styles.bestBadge}><Text style={styles.bestBadgeText}>LOWEST LISTED</Text></View>}</View>
             <View style={styles.breakdown}><Text style={styles.breakLabel}>Product</Text><Text style={styles.breakValue}>{money(p.price)}</Text></View>
-            <View style={styles.breakdown}><Text style={styles.breakLabel}>Delivery in this demo</Text><Text style={styles.breakValue}>{money(p.deliveryFee)}</Text></View>
+            <View style={styles.breakdown}><Text style={styles.breakLabel}>Estimated delivery fee</Text><Text style={styles.breakValue}>{money(p.deliveryFee)}</Text></View>
             <View style={styles.breakdown}><Text style={styles.breakLabel}>Discount</Text><Text style={styles.discountValue}>− {money(p.discount)}</Text></View>
-            <View style={styles.totalLine}><Text style={styles.totalLabel}>Final demo cost</Text><Text style={styles.totalValue}>{money(final)}</Text></View>
+            <View style={styles.totalLine}><Text style={styles.totalLabel}>Estimated total</Text><Text style={styles.totalValue}>{money(final)}</Text></View>
             <Text style={styles.unitPrice}>Unit price: {money(final)} per {item.quantity}</Text>
             <PrimaryButton label={`Open ${p.store}`} onPress={() => openOffer({ label: p.store, webUrl: buildStoreSearchUrl(`${item.brand} ${item.name}`, p.store), fallbackUrl: p.url, appUrl: p.appUrl })} secondary={i !== 0} />
             <PrimaryButton label={`📍 Find nearby ${p.store} branches`} onPress={() => openLocationSearch(p.locationSearch ?? p.store)} secondary />
@@ -895,18 +919,18 @@ function GroceryCompareScreen({ groceryId, back }: { groceryId: string; back: ()
 function GenericCategoryScreen({ title, back }: { title: string; back: () => void }) {
   const [query, setQuery] = useState('');
   const [budget, setBudget] = useState('500');
-  const demoProducts = [
+  const sampleProducts = [
     { name: `${title} Essentials`, store: 'Noon', price: 129 },
     { name: `${title} Value Pick`, store: 'Amazon.ae', price: 149 },
-    { name: `${title} Premium Pick`, store: 'Demo Retailer', price: 199 },
+    { name: `${title} Premium Pick`, store: 'Illustrative retailer', price: 199 },
   ].filter((p) => p.price <= (Number(budget) || 99999) && p.name.toLowerCase().includes(query.toLowerCase()));
   return (
     <ScrollView contentContainerStyle={styles.page}>
-      <AppHeader title={title} subtitle="Prototype comparison experience" onBack={back} />
+      <AppHeader title={title} subtitle="Explore available listings" onBack={back} />
       <TextInput style={styles.bigInput} placeholder={`Search ${title.toLowerCase()}`} value={query} onChangeText={setQuery} />
       <View style={styles.moneyInputRow}><Text style={styles.currencyPrefix}>Max AED</Text><TextInput style={styles.moneyInput} keyboardType="numeric" value={budget} onChangeText={setBudget} /></View>
-      <View style={styles.notice}><Text style={styles.noticeText}>This category uses reusable demo comparison cards. Food, Shoes and Groceries are the fully developed priority journeys.</Text></View>
-      {demoProducts.map((p, i) => (
+      <View style={styles.notice}><Text style={styles.noticeText}>These are illustrative listings. Live product availability and retailer pricing may vary.</Text></View>
+      {sampleProducts.map((p, i) => (
         <View key={p.name} style={[styles.listCard, i === 0 && styles.bestCard]}>
           <SampleImage label={title} compact />
           <View style={{ flex: 1 }}><Text style={styles.listTitle}>{p.name}</Text><Text style={styles.listSub}>{p.store}</Text><Text style={styles.shoePrice}>{money(p.price)}</Text></View>
@@ -932,68 +956,27 @@ function BottomTabs({ active, onSelect }: { active: TabName; onSelect: (tab: Tab
 }
 
 
-function BasketScreen({ basket, setBasket, go }: { basket: BasketLine[]; setBasket: React.Dispatch<React.SetStateAction<BasketLine[]>>; go: (screen: Screen) => void }) {
-  const lines = basket.map((line) => ({ ...line, item: menuItems.find((item) => item.id === line.itemId) })).filter((line) => !!line.item);
-  const subtotal = lines.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0);
-  const restaurantIds = Array.from(new Set(lines.map((line) => line.item!.restaurantId)));
-  return (
-    <ScrollView contentContainerStyle={styles.page}>
-      <AppHeader title="Your basket" subtitle="Review your basket and subtotal" />
-      <View style={styles.notice}><Text style={styles.noticeText}>Basket prices use demonstration catalogue values, not live platform quotes. Items from different restaurants cannot be combined into one restaurant delivery comparison.</Text></View>
-      {lines.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>Your basket is empty</Text><Text style={styles.emptyText}>Browse a restaurant menu and add meals to your basket.</Text><PrimaryButton label="Browse restaurants" onPress={() => go({ name: 'food' })} /></View> : (
-        <>
-          {lines.map((line) => <View key={line.lineId} style={styles.listCard}>
-            <SampleImage label={line.item!.imageLabel} imageUri={line.item!.imageUri} fallbackIcon={line.item!.fallbackIcon} compact />
-            <View style={{ flex: 1 }}><Text style={styles.listTitle}>{line.item!.name}</Text><Text style={styles.listSub}>{line.option} · {line.note} · {money(line.unitPrice)} each</Text><Text style={styles.shoePrice}>{money(line.unitPrice * line.quantity)}</Text>
-              <View style={styles.quantityRow}><TouchableOpacity style={styles.qtyButton} onPress={() => setBasket((old) => old.map((x) => x.lineId === line.lineId ? { ...x, quantity: Math.max(1, x.quantity - 1) } : x))}><Text style={styles.qtyText}>−</Text></TouchableOpacity><Text style={styles.qtyNumber}>{line.quantity}</Text><TouchableOpacity style={styles.qtyButton} onPress={() => setBasket((old) => old.map((x) => x.lineId === line.lineId ? { ...x, quantity: x.quantity + 1 } : x))}><Text style={styles.qtyText}>+</Text></TouchableOpacity><TouchableOpacity onPress={() => setBasket((old) => old.filter((x) => x.lineId !== line.lineId))}><Text style={styles.sectionAction}>Remove</Text></TouchableOpacity></View>
-            </View>
-          </View>)}
-          <View style={styles.infoCard}><Text style={styles.infoTitle}>Basket subtotal</Text><Text style={styles.totalValue}>{money(subtotal)}</Text><Text style={styles.infoText}>{lines.length} line item(s) · {restaurantIds.length} restaurant(s)</Text></View>
-          <View style={styles.notice}><Text style={styles.noticeText}>Your basket subtotal is shown above. Confirm delivery and service fees in the retailer or delivery app before ordering.</Text></View>
-        </>
-      )}
-    </ScrollView>
-  );
+class RootErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F4EA' }}>
+        <ScrollView contentContainerStyle={{ padding: 24, gap: 12 }}>
+          <Text style={{ fontSize: 22, fontWeight: '900', color: '#176B4D' }}>Waffer hit a problem</Text>
+          <Text style={{ color: '#333' }}>Please close and reopen the app. If this keeps happening, send this message to the developer:</Text>
+          <Text selectable style={{ color: '#B3261E' }}>{String(this.state.error?.message || this.state.error)}</Text>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 }
 
-function BasketCompareScreen({ basket, back }: { basket: BasketLine[]; back: () => void }) {
-  const lines = basket.map((line) => ({ ...line, item: menuItems.find((item) => item.id === line.itemId) })).filter((line) => !!line.item);
-  const platforms = ['Talabat', 'Smiles', 'Keeta'];
-  const totals = platforms.map((platform) => {
-    const prices = lines.map((line) => line.item!.prices.find((p) => p.platform === platform));
-    const available = prices.every(Boolean);
-    const subtotal = prices.reduce((sum, p, i) => sum + (p ? p.itemPrice * (lines[i]?.quantity ?? 0) : 0), 0);
-    const delivery = prices[0]?.deliveryFee ?? 0;
-    const service = prices[0]?.serviceFee ?? 0;
-    const discount = prices.reduce((sum, p, i) => sum + (p?.discount ?? 0) * (lines[i]?.quantity ?? 0), 0);
-    const destination = lines[0]?.item!.prices.find((offer) => offer.platform === platform);
-    return { platform, available, subtotal, delivery, service, discount, total: subtotal + delivery + service - discount, url: destination?.url, appUrl: destination?.appUrl, icon: destination?.icon };
-  }).filter((x) => x.available).sort((a, b) => a.total - b.total);
-  const best = totals[0];
-  return <ScrollView contentContainerStyle={styles.page}>
-    <AppHeader title="Basket comparison" subtitle="Same selected items · sample platform values" onBack={back} />
-    <View style={styles.notice}><Text style={styles.noticeText}>DEMO ESTIMATES ONLY. These totals use bundled sample data, not live quotes. Promotions, fees and availability are not verified; delivery/service fees are modeled once per basket.</Text></View>
-    {lines.map((line) => <View key={line.lineId} style={styles.breakdown}><Text style={styles.breakLabel}>{line.quantity} × {line.item!.name} ({line.option})</Text><Text style={styles.breakValue}>{money(line.unitPrice * line.quantity)}</Text></View>)}
-    {totals.map((p, i) => <View key={p.platform} style={[styles.platformCard, i === 0 && styles.bestCard]}>
-      <View style={styles.platformTop}><BrandBadge name={p.platform} icon={p.icon} />{i === 0 && <View style={styles.bestBadge}><Text style={styles.bestBadgeText}>LOWEST DEMO TOTAL</Text></View>}</View>
-      <View style={styles.breakdown}><Text style={styles.breakLabel}>Items subtotal</Text><Text style={styles.breakValue}>{money(p.subtotal)}</Text></View>
-      <View style={styles.breakdown}><Text style={styles.breakLabel}>Delivery fee (sample)</Text><Text style={styles.breakValue}>{money(p.delivery)}</Text></View>
-      <View style={styles.breakdown}><Text style={styles.breakLabel}>Service fee (sample)</Text><Text style={styles.breakValue}>{money(p.service)}</Text></View>
-      <View style={styles.breakdown}><Text style={styles.breakLabel}>Discount (sample)</Text><Text style={styles.discountValue}>− {money(p.discount)}</Text></View>
-      <View style={styles.totalLine}><Text style={styles.totalLabel}>Estimated demo total</Text><Text style={styles.totalValue}>{money(p.total)}</Text></View>
-      <PrimaryButton label={i === 0 ? `See best offer · ${p.platform}` : `See offer · ${p.platform}`} onPress={() => {
-        if (p.url) openOffer({ label: p.platform, webUrl: buildStoreSearchUrl(lines.map((line) => line.item!.name).join(' '), p.platform), fallbackUrl: p.url, appUrl: p.appUrl });
-      }} secondary={i !== 0} />
-    </View>)}
-    {best && <View style={styles.savingResult}><Text style={styles.savingResultLabel}>Lowest sample basket</Text><Text style={styles.savingResultValue}>{money(best.total)}</Text><Text style={styles.savingResultText}>Not a verified checkout price. Confirm the final basket and fees in the delivery app.</Text></View>}
-    <Text style={styles.disclaimer}>No platform cart API is configured. Continue to Order does not transfer items or place an order.</Text>
-  </ScrollView>;
-}
-
-export default function App() {
+function AppContent() {
   const [darkMode, setDarkMode] = useState(false);
-  const [basket, setBasket] = useState<BasketLine[]>([]);
   const [groceryBasket, setGroceryBasket] = useState<GroceryBasketLine[]>([]);
+  const [selectedLocation, setSelectedLocation] = useState('Mohammed Bin Zayed City, Abu Dhabi');
   activeColors = darkMode ? darkColors : lightColors;
   styles = createStyles(activeColors);
 
@@ -1008,16 +991,14 @@ export default function App() {
     if (current.tab === 'Home') content = <HomeScreen go={go} />;
     else if (current.tab === 'Explore') content = <ExploreScreen go={go} />;
     else if (current.tab === 'Deals') content = <DealsScreen />;
-    else if (current.tab === 'Basket') content = <BasketScreen basket={basket} setBasket={setBasket} go={go} />;
-    else content = <ProfileScreen darkMode={darkMode} onDarkModeChange={setDarkMode} />;
+    else content = <ProfileScreen darkMode={darkMode} onDarkModeChange={setDarkMode} selectedLocation={selectedLocation} onLocationChange={setSelectedLocation} />;
   } else if (current.name === 'food') content = <FoodScreen go={go} back={back} />;
   else if (current.name === 'menu') content = <MenuScreen restaurantId={current.restaurantId} go={go} back={back} />;
-  else if (current.name === 'basketCompare') content = <BasketCompareScreen basket={basket} back={back} />;
-  else if (current.name === 'foodCompare') content = <FoodCompareScreen itemId={current.itemId} quantity={current.quantity} option={current.option} back={back} setBasket={setBasket} go={go} />;
+  else if (current.name === 'foodCompare') content = <FoodCompareScreen itemId={current.itemId} quantity={current.quantity} option={current.option} back={back} />;
   else if (current.name === 'shoes') content = <ShoesScreen go={go} back={back} />;
   else if (current.name === 'shopping') content = <ShoppingScreen back={back} />;
   else if (current.name === 'shoeResults') content = <ShoeResultsScreen filters={current.filters} back={back} />;
-  else if (current.name === 'groceries') content = <GroceriesScreen go={go} back={back} basket={groceryBasket} setBasket={setGroceryBasket} />;
+  else if (current.name === 'groceries') content = <GroceriesScreen go={go} back={back} basket={groceryBasket} setBasket={setGroceryBasket} selectedLocation={selectedLocation} />;
   else if (current.name === 'groceryBasket') content = <GroceryBasketScreen basket={groceryBasket} setBasket={setGroceryBasket} back={back} />;
   else if (current.name === 'groceryCompare') content = <GroceryCompareScreen groceryId={current.groceryId} back={back} />;
   else content = <GenericCategoryScreen title={current.title} back={back} />;
@@ -1043,8 +1024,6 @@ function createStyles(colors: ThemeColors) {
   backButtonText: { color: colors.ink, fontSize: 34, lineHeight: 34, marginTop: -4 },
   headerTitle: { color: colors.ink, fontSize: 22, fontWeight: '900' },
   headerSubtitle: { color: colors.muted, fontSize: 12, marginTop: 2 },
-  demoChip: { backgroundColor: activeColors.greenSoft, borderRadius: radius.pill, paddingHorizontal: 9, paddingVertical: 5 },
-  demoChipText: { color: activeColors.greenDark, fontSize: 10, fontWeight: '900', letterSpacing: 0.7 },
   hero: { backgroundColor: activeColors.green, borderRadius: 28, padding: 22, gap: 10 },
   heroEyebrow: { color: colors.heroEyebrow, fontSize: 11, fontWeight: '900', letterSpacing: 1.1 },
   heroTitle: { color: colors.white, fontSize: 30, lineHeight: 35, fontWeight: '900' },
@@ -1208,3 +1187,9 @@ function createStyles(colors: ThemeColors) {
   tabLabelActive: { color: activeColors.greenDark, fontWeight: '900' },
   });
 }
+
+function App() {
+  return <RootErrorBoundary><AppContent /></RootErrorBoundary>;
+}
+
+export default App;

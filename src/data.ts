@@ -15,7 +15,7 @@ const allRestaurants: Restaurant[] = [
   { id: 'joll', name: "Jollibee", cuisine: 'Chicken & Filipino meals', imageLabel: 'Jollibee logo', logoUri: 'https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://jollibeefoods.com&size=256', fallbackIcon: 'J', locationSearch: "Jollibee, Mohamed Bin Zayed City, Abu Dhabi" },
 ];
 
-// The active Food catalogue contains photo-backed menu items with verified prices and clearly labelled demo comparison offers.
+// The active Food catalogue contains photo-backed menu items with verified prices and clearly labelled indicative price estimates.
 const importedMenuItems: MenuItem[] = require('./menus/imported.json');
 export const menuItems: MenuItem[] = importedMenuItems;
 
@@ -57,7 +57,7 @@ export const groceries: Grocery[] = [
 ];
 
 export const deals = [
-  { id: 'd1', title: '20% off selected sneakers', source: 'Demo retailer offer', original: 299, price: 239, sponsored: false },
-  { id: 'd2', title: 'Meal deal under AED 30', source: 'Demo restaurant offer', original: 37, price: 29, sponsored: true },
-  { id: 'd3', title: 'Weekend grocery savings', source: 'Demo supermarket offer', original: 75, price: 59, sponsored: false },
+  { id: 'd1', title: '20% off selected sneakers', source: 'Illustrative retailer offer', original: 299, price: 239, sponsored: false },
+  { id: 'd2', title: 'Meal deal under AED 30', source: 'Illustrative restaurant offer', original: 37, price: 29, sponsored: true },
+  { id: 'd3', title: 'Weekend grocery savings', source: 'Illustrative supermarket offer', original: 75, price: 59, sponsored: false },
 ];
