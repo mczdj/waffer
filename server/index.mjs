@@ -26,7 +26,7 @@ const UAE_RETAILER_DOMAINS = new Set([
   'spinneys.com', 'waitrose.ae', 'unioncoop.ae', 'nesto.com',
   'danubehome.com'
 ]);
-const UAE_RETAILER_NAMES = /\\b(noon|amazon\\.ae|carrefour|lulu|talabat|deliveroo|spinneys|waitrose|union coop|nesto|life pharmacy|aster|supercare|sharaf dg|virgin megastore)\\b/i;
+const UAE_RETAILER_NAMES = /\b(noon|amazon\.ae|carrefour|lulu|talabat|deliveroo|spinneys|waitrose|union coop|nesto|life pharmacy|aster|supercare|sharaf dg|virgin megastore)\b/i;
 
 function isUaeRetailer(row) {
   const link = safeHttpUrl(row.product_link || row.link);
@@ -37,7 +37,7 @@ function isUaeRetailer(row) {
   const knownDomain = [...UAE_RETAILER_DOMAINS].some((domain) => host === domain || host.endsWith(`.${domain}`));
   const sellerName = String(row.source || row.merchant || '');
   const shipping = String(row.delivery || row.shipping || '');
-  const explicitUaeShipping = /\\b(UAE|United Arab Emirates|Abu Dhabi|Dubai|Sharjah)\\b/i.test(shipping);
+  const explicitUaeShipping = /\b(UAE|United Arab Emirates|Abu Dhabi|Dubai|Sharjah)\b/i.test(shipping);
   return isAeDomain || knownDomain || (UAE_RETAILER_NAMES.test(sellerName) && explicitUaeShipping);
 }
 
@@ -82,9 +82,44 @@ async function serpApi(params) {
 async function fetchOffers(q) {
   const hit = cache.get(q);
   if (hit && Date.now() - hit.t < CACHE_MS) return hit.v;
-  const localizedQuery = /\\b(UAE|United Arab Emirates)\\b/i.test(q) ? q : `${q} UAE`;
-  const payload = await serpApi({ engine: 'google_shopping', q: localizedQuery, google_domain: 'google.ae' });
-  const value = { query: q, offers: normalize(payload) };
+
+  const localizedQuery = /\b(UAE|United Arab Emirates)\b/i.test(q) ? q : `${q} UAE`;
+  const isDairyQuery = /\b(milk|yogurt|yoghurt|cheese|eggs?)\b/i.test(q);
+  const fallbackQueries = isDairyQuery
+    ? ['milk UAE', 'eggs UAE', 'yogurt UAE', 'cheese UAE']
+    : [];
+  const queries = [localizedQuery, ...fallbackQueries];
+  const combinedRows = [];
+  const attempted = [];
+  let lastNoResultsError = null;
+
+  for (const searchQuery of [...new Set(queries)]) {
+    attempted.push(searchQuery);
+    try {
+      const payload = await serpApi({
+        engine: 'google_shopping',
+        q: searchQuery,
+        google_domain: 'google.ae',
+      });
+      const rows = Array.isArray(payload?.shopping_results) ? payload.shopping_results : [];
+      combinedRows.push(...rows);
+      // Stop once enough UAE-verified listings are available. If filtering
+      // removes all rows, try the simpler dairy searches before giving up.
+      if (normalize({ shopping_results: combinedRows }).length >= 5) break;
+    } catch (error) {
+      if (/hasn't returned any results|did not return any results|no results/i.test(error.message)) {
+        lastNoResultsError = error;
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  const value = { query: q, offers: normalize({ shopping_results: combinedRows }) };
+  // A no-results response is a valid empty search, not a server failure.
+  if (!value.offers.length && lastNoResultsError && attempted.length === queries.length) {
+    console.warn(`Waffer grocery search returned no results after fallback queries: ${attempted.join(' | ')}`);
+  }
   cache.set(q, { t: Date.now(), v: value });
   return value;
 }
