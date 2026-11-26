@@ -9,7 +9,10 @@
     "web": "expo start --web",
     "fetch-logos": "node scripts/fetch-logos.mjs",
     "import-menu": "node scripts/import-menu.mjs",
-    "price-server": "node server/index.mjs"
+    "price-server": "node server/index.mjs",
+    "build:pages": "node scripts/build-pages.cjs",
+    "typecheck": "tsc --noEmit",
+    "test:map": "node scripts/test-grocery-map.cjs"
   },
   "dependencies": {
     "expo": "~58.0.26",

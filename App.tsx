@@ -12,12 +12,16 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
+import GroceryStreetMap, { MapCamera } from './src/components/GroceryStreetMap';
+import { AREA_CENTERS, Coordinate, NearbyGroceryPlace, distanceKm, fetchNearbyStores } from './src/services/nearby';
 import { darkColors, lightColors, radius, ThemeColors } from './src/theme';
 import { groceries, menuItems, restaurants, shoes } from './src/data';
 import { Grocery, MenuItem, PlatformPrice, Shoe } from './src/types';
+import { getWebLayout, type WebLayout } from './src/utils/webLayout';
 import { buildStoreSearchUrl, openLocationSearch, openOffer } from './src/utils/offerNavigation';
 
 type TabName = 'Home' | 'Explore' | 'Deals' | 'Profile';
@@ -35,8 +39,6 @@ type Screen =
   | { name: 'category'; title: string };
 
 type GroceryBasketLine = { id: string; title: string; store: string; price: number; priceText: string; link: string; image: string | null; quantity: number };
-type Region = { latitude: number; longitude: number; latitudeDelta: number; longitudeDelta: number };
-type NearbyGroceryPlace = { id: string; name: string; lat: number; lon: number; category: string; address: string; phone: string | null; website: string | null; distance?: number };
 
 type ShoeFilters = {
   type: string;
@@ -117,6 +119,10 @@ function Pill({ text, selected, onPress }: { text: string; selected?: boolean; o
   );
 }
 
+function ResponsivePillRow({ children }: { children: React.ReactNode }) {
+  return Platform.OS === 'web' ? <View style={styles.wrap}>{children}</View> : <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }}>{children}</ScrollView>;
+}
+
 function PrimaryButton({ label, onPress, secondary = false }: { label: string; onPress: () => void; secondary?: boolean }) {
   return (
     <TouchableOpacity onPress={onPress} style={[styles.primaryButton, secondary && styles.secondaryButton]}>
@@ -184,6 +190,9 @@ function RestaurantLogo({ name, logoUri }: { name: string; logoUri?: string }) {
 }
 
 function HomeScreen({ go }: { go: (screen: Screen) => void }) {
+  const isWeb = Platform.OS === 'web';
+  const { width } = useWindowDimensions();
+  const dealColumns = getWebLayout(width).dealColumns;
   const [search, setSearch] = useState('');
   const [popularDeals, setPopularDeals] = useState<LiveDeal[]>([]);
   const [dealsLoading, setDealsLoading] = useState(true);
@@ -207,9 +216,18 @@ function HomeScreen({ go }: { go: (screen: Screen) => void }) {
     go({ name: 'shopping' });
   };
 
+  const dealCards = popularDeals.map((deal) => (
+    <TouchableOpacity key={deal.id} style={styles.dealCard} onPress={() => Linking.openURL(deal.url)}>
+      <Text style={styles.sponsored}>CURRENT PROMOTION</Text>
+      <Text style={styles.dealTitle} numberOfLines={isWeb ? undefined : 3}>{deal.title}</Text>
+      <Text style={styles.dealSource}>{deal.store}</Text>
+      <Text style={styles.dealValidity}>{deal.validUntil ? `Valid until ${deal.validUntil}` : 'Check flyer for dates'}</Text>
+      <Text style={styles.dealOpen}>Open flyer ↗</Text>
+    </TouchableOpacity>
+  ));
   return (
-    <ScrollView contentContainerStyle={styles.page} showsVerticalScrollIndicator={false}>
-      <AppHeader title="Waffer وفّر" subtitle="Smart shopping for the UAE" />
+    <ScrollView contentContainerStyle={styles.page} showsVerticalScrollIndicator={isWeb}>
+      {!isWeb && <AppHeader title="Waffer وفّر" subtitle="Smart shopping for the UAE" />}
       <View style={styles.hero}>
         <Text style={styles.heroEyebrow}>SHOP SMARTER</Text>
         <Text style={styles.heroTitle}>Find what you want. Pay less.</Text>
@@ -264,17 +282,13 @@ function HomeScreen({ go }: { go: (screen: Screen) => void }) {
       {dealsLoading ? (
         <View style={styles.infoCard}><Text style={styles.infoText}>Checking current UAE promotions…</Text></View>
       ) : popularDeals.length ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
-          {popularDeals.map((deal) => (
-            <TouchableOpacity key={deal.id} style={styles.dealCard} onPress={() => Linking.openURL(deal.url)}>
-              <Text style={styles.sponsored}>CURRENT PROMOTION</Text>
-              <Text style={styles.dealTitle} numberOfLines={3}>{deal.title}</Text>
-              <Text style={styles.dealSource}>{deal.store}</Text>
-              <Text style={styles.dealValidity}>{deal.validUntil ? `Valid until ${deal.validUntil}` : 'Check flyer for dates'}</Text>
-              <Text style={styles.dealOpen}>Open flyer ↗</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        isWeb ? <View style={styles.webDealGrid}>
+          {Array.from({ length: Math.ceil(dealCards.length / dealColumns) }, (_, row) => {
+            const cards = dealCards.slice(row * dealColumns, (row + 1) * dealColumns);
+            return <View key={row} style={styles.webDealRow}>{cards}{Array.from({ length: dealColumns - cards.length }, (_, i) => <View key={`empty-${i}`} style={{ flex: 1, minWidth: 0 }} />)}</View>;
+          })}
+        </View> :
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>{dealCards}</ScrollView>
       ) : (
         <View style={styles.infoCard}>
           <Text style={styles.infoText}>{dealsError ? 'Live offers could not be refreshed right now.' : 'No active flyers were found right now.'} Browse the current UAE promotion directory instead.</Text>
@@ -711,11 +725,13 @@ const GROCERY_CATEGORIES = [
   { label: 'Pantry', query: 'cooking oil canned food spices' },
 ];
 
-function GroceriesScreen({ go, back, basket, setBasket, selectedLocation }: {
+function GroceriesScreen({ go, back, basket, setBasket, selectedLocation, onLocationChange }: {
   go: (s: Screen) => void; back: () => void; basket: GroceryBasketLine[];
-  setBasket: React.Dispatch<React.SetStateAction<GroceryBasketLine[]>>; selectedLocation: string;
+  setBasket: React.Dispatch<React.SetStateAction<GroceryBasketLine[]>>; selectedLocation: string; onLocationChange: (value: string) => void;
 }) {
   const [query, setQuery] = useState('');
+  const [mapDragging, setMapDragging] = useState(false);
+  const [showNearbyMap, setShowNearbyMap] = useState(true);
   const [category, setCategory] = useState('All');
   const [offers, setOffers] = useState<LiveOffer[]>([]);
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
@@ -743,7 +759,7 @@ function GroceriesScreen({ go, back, basket, setBasket, selectedLocation }: {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+    <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" scrollEnabled={!mapDragging}>
       <AppHeader title="Groceries" subtitle="Browse UAE supermarket listings" onBack={back} />
       <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
         <TextInput style={[styles.bigInput, { flex: 1, marginBottom: 0 }]} placeholder="Search milk, rice, eggs, apples…" value={query} onChangeText={(v) => { setQuery(v); if (v.trim()) setCategory('All'); }} returnKeyType="search" />
@@ -752,10 +768,12 @@ function GroceriesScreen({ go, back, basket, setBasket, selectedLocation }: {
         </TouchableOpacity>
       </View>
       <View style={styles.notice}><Text style={styles.noticeText}>LIVE UAE GROCERY SEARCH · Search a generic item to browse available brands and retailer listings. Prices are sorted from lowest to highest.</Text></View>
+      <Pill text={showNearbyMap ? 'Hide nearby store map' : 'Show nearby store map'} onPress={() => { setShowNearbyMap(v => !v); setMapDragging(false); }} />
+      {showNearbyMap && <NearbyGroceryMap selectedLocation={selectedLocation} onLocationChange={onLocationChange} onGesture={setMapDragging} />}
       <Text style={styles.sectionTitle}>Browse categories</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }}>
+      <ResponsivePillRow>
         {GROCERY_CATEGORIES.map((c) => <Pill key={c.label} text={c.label} selected={category === c.label} onPress={() => { setCategory(c.label); setQuery(''); if (c.label === 'All') { setOffers([]); setStatus('idle'); } }} />)}
-      </ScrollView>
+      </ResponsivePillRow>
       {searchTerm.length < 2 ? (
         <View style={styles.empty}><Text style={styles.emptyTitle}>Find your groceries</Text><Text style={styles.emptyText}>Search for a product or choose a category. For example, searching “milk” can return different brands and package sizes from UAE retailers.</Text></View>
       ) : status === 'loading' ? <View style={styles.empty}><Text style={styles.emptyTitle}>Searching UAE supermarkets…</Text><Text style={styles.emptyText}>Retrieving listings and sorting by listed item price.</Text></View>
@@ -781,71 +799,116 @@ function GroceriesScreen({ go, back, basket, setBasket, selectedLocation }: {
           </View>
         ))}
       </View>}
-      <NearbyGroceryMap selectedLocation={selectedLocation} />
       <Text style={styles.disclaimer}>Prices are provider-returned listing prices, not guaranteed checkout prices. Delivery and service fees may apply and are excluded from the item subtotal unless separately verified. Product availability and retailer links can change.</Text>
     </ScrollView>
   );
 }
 
-function NearbyGroceryMap({ selectedLocation }: { selectedLocation: string }) {
-  const [permission, setPermission] = useState<'pending' | 'granted' | 'denied'>('pending');
-  const [region, setRegion] = useState<Region | null>(null);
+function NearbyGroceryMap({ selectedLocation, onLocationChange, onGesture }: { selectedLocation: string; onLocationChange: (value: string) => void; onGesture: (active: boolean) => void }) {
+  const [origin, setOrigin] = useState<Coordinate | null>(null);
+  const [camera, setCamera] = useState<MapCamera | null>(null);
+  const [gpsOrigin, setGpsOrigin] = useState<Coordinate | null>(null);
   const [places, setPlaces] = useState<NearbyGroceryPlace[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [locating, setLocating] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [locationError, setLocationError] = useState('');
   const [mapError, setMapError] = useState('');
+  const [refresh, setRefresh] = useState(0);
+  const [locationRefresh, setLocationRefresh] = useState(0);
+  const [showAreas, setShowAreas] = useState(false);
+  const [onlySupermarkets, setOnlySupermarkets] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const [searchedMapArea, setSearchedMapArea] = useState(false);
   useEffect(() => {
     let active = true;
+    setLocating(true); setLocationError(''); setMapError(''); setOrigin(null); setCamera(null); setGpsOrigin(null); setPlaces([]); setSelectedId(null); setShowAll(false); setSearchedMapArea(false);
     (async () => {
       try {
-        let latitude: number; let longitude: number;
+        let center: Coordinate;
         if (selectedLocation === 'Current device location') {
-          const result = await Location.requestForegroundPermissionsAsync();
+          const permission = await Location.requestForegroundPermissionsAsync();
           if (!active) return;
-          if (result.status !== 'granted') { setPermission('denied'); return; }
-          setPermission('granted');
-          const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          latitude = pos.coords.latitude; longitude = pos.coords.longitude;
+          if (permission.status !== 'granted') throw new Error('Location access was denied. Choose an area below or allow location access in your device settings.');
+          const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          center = { latitude: position.coords.latitude, longitude: position.coords.longitude };
+          if (active) setGpsOrigin(center);
         } else {
-          setPermission('granted');
-          const matches = await Location.geocodeAsync(`${selectedLocation}, UAE`);
-          const match = matches[0];
-          if (!match) throw new Error(`Could not find ${selectedLocation}. Choose another area or use device location.`);
-          latitude = match.latitude; longitude = match.longitude;
+          const area = AREA_CENTERS[selectedLocation];
+          if (!area) throw new Error('Choose a supported UAE area.');
+          center = area;
         }
         if (!active) return;
-        const center = { latitude, longitude, latitudeDelta: 0.045, longitudeDelta: 0.045 };
-        setRegion(center);
-        setLoading(true);
-        const base = process.env.EXPO_PUBLIC_OFFERS_API_URL;
-        if (!base) throw new Error('Nearby store service is not configured.');
-        const response = await fetch(`${base.replace(/\/$/, '')}/nearby?lat=${center.latitude}&lon=${center.longitude}`);
-        if (!response.ok) throw new Error(`Nearby store service returned ${response.status}.`);
-        const data = await response.json();
-        if (active) setPlaces(Array.isArray(data.places) ? data.places : []);
-      } catch (e: any) { if (active) setMapError(e?.message || 'Could not load nearby stores.'); }
-      finally { if (active) setLoading(false); }
+        setOrigin(center); setCamera({ center, zoom: 12 });
+      } catch (e: any) { if (active) setLocationError(e?.message || 'Could not get location. Choose an area manually.'); }
+      finally { if (active) setLocating(false); }
     })();
     return () => { active = false; };
-  }, [selectedLocation]);
-  return (
-    <View style={{ gap: 10, marginTop: 8 }}>
-      <SectionTitle title="Nearby supermarkets & baqalas" action="Around you" />
-      <Text style={styles.helperText}>Allow location access to find nearby supermarkets, grocery shops and convenience stores. Only foreground location is requested. Place data: © OpenStreetMap contributors.</Text>
-      {permission === 'denied' ? <View style={styles.notice}><Text style={styles.noticeText}>Location permission was not granted. Enable location access in your phone settings to see nearby stores. You can still search grocery products.</Text></View>
-      : permission === 'pending' ? <View style={styles.empty}><Text style={styles.emptyText}>Requesting location permission…</Text></View>
-      : region ? <>
-        <PrimaryButton label="Open nearby supermarkets in Maps ↗" onPress={() => Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${region.latitude},${region.longitude}+supermarket+grocery`)} />
-        {loading && <Text style={styles.helperText}>Finding nearby shops…</Text>}
-        {!!mapError && <Text style={styles.helperText}>{mapError}</Text>}
-        {places.slice(0, 12).map((place) => <View key={place.id} style={styles.groceryCard}>
-          <View style={[styles.sampleImage, { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' }]}><Text style={{ fontSize: 23 }}>🏪</Text></View>
-          <View style={{ flex: 1 }}><Text style={styles.groceryName}>{place.name}</Text><Text style={styles.helperText}>{place.category} · {place.address || 'Nearby'}</Text>{place.phone ? <Text style={styles.helperText}>{place.phone}</Text> : null}</View>
-          {place.phone ? <TouchableOpacity onPress={() => Linking.openURL(`tel:${place.phone}`)}><Text style={styles.smallActionText}>CALL</Text></TouchableOpacity> : <TouchableOpacity onPress={() => openOffer({ label: place.name, webUrl: `https://www.google.com/maps/search/?api=1&query=${place.lat},${place.lon}` })}><Text style={styles.smallActionText}>MAP ↗</Text></TouchableOpacity>}
-        </View>)}
-        {!loading && places.length === 0 && !mapError && <Text style={styles.helperText}>No nearby grocery places were returned in the current search radius.</Text>}
-      </> : null}
+  }, [selectedLocation, locationRefresh]);
+  useEffect(() => {
+    if (!origin) { setLoading(false); return; }
+    let active = true;
+    const controller = new AbortController();
+    setLoading(true); setMapError(''); setPlaces([]); setSelectedId(null); setShowAll(false);
+    const timeout = setTimeout(() => { controller.abort(); if (active) { setMapError('Store search timed out. Try again.'); setLoading(false); } }, 65000);
+    fetchNearbyStores(origin, controller.signal)
+      .then(rows => { if (active && !controller.signal.aborted) setPlaces(rows); })
+      .catch(e => { if (active && !controller.signal.aborted) setMapError(e?.message || 'Could not load nearby stores.'); })
+      .finally(() => { clearTimeout(timeout); if (active) setLoading(false); });
+    return () => { active = false; clearTimeout(timeout); controller.abort(); };
+  }, [origin, refresh]);
+  const filtered = onlySupermarkets ? places.filter(p => p.category === 'supermarket') : places;
+  const selected = filtered.find(p => p.id === selectedId);
+  const moved = origin && camera && distanceKm(origin, camera.center) > 0.15;
+  const isGpsOrigin = !!(origin && gpsOrigin && distanceKm(origin, gpsOrigin) < 0.001);
+  const choose = (id: string) => {
+    setSelectedId(id);
+    const p = filtered.find(item => item.id === id);
+    if (p && camera) setCamera({ center: { latitude: p.lat, longitude: p.lon }, zoom: Math.max(15, camera.zoom) });
+  };
+  const directions = (p: NearbyGroceryPlace) => openOffer({ label: p.name, webUrl: `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}` });
+  const useGps = () => {
+    setShowAreas(false);
+    if (selectedLocation === 'Current device location') setLocationRefresh(n => n + 1);
+    else onLocationChange('Current device location');
+  };
+  return <View style={[styles.infoCard, { gap: 10 }]}>
+    <SectionTitle title="Nearby supermarkets & baqalas" action="Live map" />
+    <Text style={styles.helperText}>📍 {searchedMapArea && origin ? `Map area (${origin.latitude.toFixed(3)}, ${origin.longitude.toFixed(3)})` : selectedLocation} · 5 km search radius. Drag the map, zoom, or tap a store pin. Store data is supplied by OpenStreetMap, not estimated locations.</Text>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+      <Pill text={locating ? 'Locating…' : 'Use my location'} onPress={locating ? undefined : useGps} />
+      <Pill text={showAreas ? 'Hide areas' : 'Choose area'} onPress={() => setShowAreas(v => !v)} />
     </View>
-  );
+    {showAreas && <View style={{ gap: 5 }}>{UAE_LOCATION_OPTIONS.map(area => <TouchableOpacity key={area} style={styles.settingRow} onPress={() => { onLocationChange(area); setShowAreas(false); }}><Text style={styles.settingLabel}>{area}</Text><Text style={{ color: activeColors.green }}>{area === selectedLocation ? '✓' : '›'}</Text></TouchableOpacity>)}</View>}
+    {!!locationError && <View style={styles.notice}><Text style={styles.noticeText}>{locationError}</Text></View>}
+    {locating && <Text style={styles.helperText}>Finding map location…</Text>}
+    {origin && camera && <>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        <Pill text="All grocery stores" selected={!onlySupermarkets} onPress={() => setOnlySupermarkets(false)} />
+        <Pill text="Supermarkets only" selected={onlySupermarkets} onPress={() => { setOnlySupermarkets(true); if (selected?.category !== 'supermarket') setSelectedId(null); }} />
+      </View>
+      <GroceryStreetMap camera={camera} onCameraChange={setCamera} origin={origin} isGpsOrigin={isGpsOrigin} places={filtered} selectedId={selectedId} onSelect={setSelectedId} onGesture={onGesture} colors={activeColors} />
+      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+        <Pill text="Search this map area" onPress={moved ? () => { setOrigin(camera.center); setSelectedId(null); setSearchedMapArea(true); } : undefined} selected={!!moved} />
+        <Pill text={loading ? 'Searching…' : 'Refresh stores'} onPress={loading ? undefined : () => setRefresh(n => n + 1)} />
+        <Pill text="Open in Google Maps ↗" onPress={() => openOffer({ label: 'Nearby supermarkets', webUrl: `https://www.google.com/maps/search/?api=1&query=supermarket+near+${origin.latitude},${origin.longitude}` })} />
+      </View>
+      {loading ? <Text style={styles.helperText}>Finding nearby shops…</Text> : mapError ? <View style={styles.notice}><Text style={styles.noticeText}>{mapError} Use Refresh stores to retry. The map remains available.</Text></View> : <Text style={styles.helperText}>{filtered.length} {filtered.length === 1 ? 'store' : 'stores'} found near the search origin. Distances are straight-line estimates.</Text>}
+      {selected && <View style={[styles.groceryCard, { borderColor: activeColors.green, alignItems: 'flex-start' }]}>
+        <View style={{ flex: 1, gap: 5 }}><Text style={styles.groceryName}>{selected.name}</Text><Text style={styles.helperText}>{selected.category} · {selected.distance?.toFixed(2)} km</Text>{!!selected.address && <Text style={styles.helperText}>{selected.address}</Text>}{!!selected.phone && <Text style={styles.helperText}>{selected.phone}</Text>}
+          <PrimaryButton label="Get directions ↗" onPress={() => directions(selected)} />
+          {!!selected.phone && <PrimaryButton label="Call store" secondary onPress={() => Linking.openURL(`tel:${selected.phone}`)} />}
+          {!!selected.website && <PrimaryButton label="Visit website ↗" secondary onPress={() => openOffer({ label: selected.name, webUrl: selected.website! })} />}
+        </View>
+        <TouchableOpacity accessibilityLabel="Close store details" onPress={() => setSelectedId(null)}><Text style={styles.groceryName}>✕</Text></TouchableOpacity>
+      </View>}
+      {filtered.slice(0, showAll ? filtered.length : 5).map(place => <TouchableOpacity key={place.id} onPress={() => choose(place.id)} style={[styles.groceryCard, selectedId === place.id && { borderColor: activeColors.green }]}>
+        <Text style={{ fontSize: 22 }}>{place.category === 'supermarket' ? '🛒' : '🏪'}</Text><View style={{ flex: 1 }}><Text style={styles.groceryName}>{place.name}</Text><Text style={styles.helperText}>{place.category} · {place.distance?.toFixed(2)} km{place.address ? ` · ${place.address}` : ''}</Text></View><Text style={styles.smallActionText}>PIN ↗</Text>
+      </TouchableOpacity>)}
+      {filtered.length > 5 && <Pill text={showAll ? 'Show fewer stores' : `Show all ${filtered.length} stores`} onPress={() => setShowAll(v => !v)} />}
+      {!loading && !mapError && filtered.length === 0 && <Text style={styles.helperText}>No matching shops were returned. Try all grocery stores or move the map and search again.</Text>}
+    </>}
+  </View>;
 }
 
 function GroceryBasketScreen({ basket, setBasket, back }: {
@@ -973,14 +1036,57 @@ class RootErrorBoundary extends React.Component<{ children: React.ReactNode }, {
   }
 }
 
+// The browser uses a persistent navigation header; native keeps its existing tab bar.
+function WebNavigation({ current, onTab, onCategory }: { current: Screen; onTab: (tab: TabName) => void; onCategory: (screen: Screen) => void }) {
+  const { width } = useWindowDimensions();
+  const layout = getWebLayout(width);
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => { setMenuOpen(false); }, [layout.mode, current]);
+  const links: { label: string; screen: Screen }[] = [
+    { label: 'Home', screen: { name: 'tabs', tab: 'Home' } },
+    { label: 'Food', screen: { name: 'food' } },
+    { label: 'Groceries', screen: { name: 'groceries' } },
+    { label: 'Shopping', screen: { name: 'shopping' } },
+    { label: 'Explore', screen: { name: 'tabs', tab: 'Explore' } },
+    { label: 'Deals', screen: { name: 'tabs', tab: 'Deals' } },
+    { label: 'Profile', screen: { name: 'tabs', tab: 'Profile' } },
+  ];
+  const isActive = (screen: Screen) => screen.name === 'tabs'
+    ? current.name === 'tabs' && screen.tab === current.tab
+    : screen.name === 'food' ? ['food', 'menu', 'foodCompare'].includes(current.name)
+    : screen.name === 'groceries' ? ['groceries', 'groceryBasket', 'groceryCompare'].includes(current.name)
+    : ['shopping', 'shoes', 'shoeResults'].includes(current.name);
+  return <View style={styles.webHeader}>
+    <View style={styles.webHeaderInner}>
+      <View style={styles.webBrandRow}>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="WAFFER home" onPress={() => onTab('Home')} style={styles.webBrand}>
+        <View style={styles.logoMark}><Text style={styles.logoMarkText}>W</Text></View>
+        <View><Text style={styles.webBrandTitle}>WAFFER</Text><Text style={styles.headerSubtitle}>Shop smarter · UAE</Text></View>
+      </TouchableOpacity>
+      {layout.phone && <TouchableOpacity accessibilityRole="button" accessibilityLabel={menuOpen ? 'Close navigation menu' : 'Open navigation menu'} accessibilityState={{ expanded: menuOpen }} style={styles.webMenuButton} onPress={() => setMenuOpen(v => !v)}><Text style={styles.webLinkText}>{menuOpen ? 'Close ✕' : 'Menu ☰'}</Text></TouchableOpacity>}
+      </View>
+      {(!layout.phone || menuOpen) && <View style={styles.webLinks}>
+        {links.map(({ label, screen }) => <TouchableOpacity key={label} accessibilityRole="button" accessibilityState={{ selected: isActive(screen) }}
+          style={[styles.webLink, isActive(screen) && styles.webLinkActive]}
+          onPress={() => { setMenuOpen(false); screen.name === 'tabs' ? onTab(screen.tab) : onCategory(screen); }}>
+          <Text style={[styles.webLinkText, isActive(screen) && styles.webLinkTextActive]}>{label}</Text>
+        </TouchableOpacity>)}
+      </View>}
+    </View>
+  </View>;
+}
+
 function AppContent() {
   const [darkMode, setDarkMode] = useState(false);
   const [groceryBasket, setGroceryBasket] = useState<GroceryBasketLine[]>([]);
   const [selectedLocation, setSelectedLocation] = useState('Mohammed Bin Zayed City, Abu Dhabi');
+  const { width } = useWindowDimensions();
+  const layout = Platform.OS === 'web' ? getWebLayout(width) : undefined;
   activeColors = darkMode ? darkColors : lightColors;
-  styles = createStyles(activeColors);
+  styles = createStyles(activeColors, layout);
 
   const [stack, setStack] = useState<Screen[]>([{ name: 'tabs', tab: 'Home' }]);
+  const isWeb = Platform.OS === 'web';
   const current = stack[stack.length - 1] ?? { name: 'tabs', tab: 'Home' as TabName };
   const go = (screen: Screen) => setStack((s) => [...s, screen]);
   const back = () => setStack((s) => s.length > 1 ? s.slice(0, -1) : s);
@@ -998,24 +1104,40 @@ function AppContent() {
   else if (current.name === 'shoes') content = <ShoesScreen go={go} back={back} />;
   else if (current.name === 'shopping') content = <ShoppingScreen back={back} />;
   else if (current.name === 'shoeResults') content = <ShoeResultsScreen filters={current.filters} back={back} />;
-  else if (current.name === 'groceries') content = <GroceriesScreen go={go} back={back} basket={groceryBasket} setBasket={setGroceryBasket} selectedLocation={selectedLocation} />;
+  else if (current.name === 'groceries') content = <GroceriesScreen go={go} back={back} basket={groceryBasket} setBasket={setGroceryBasket} selectedLocation={selectedLocation} onLocationChange={setSelectedLocation} />;
   else if (current.name === 'groceryBasket') content = <GroceryBasketScreen basket={groceryBasket} setBasket={setGroceryBasket} back={back} />;
   else if (current.name === 'groceryCompare') content = <GroceryCompareScreen groceryId={current.groceryId} back={back} />;
   else content = <GenericCategoryScreen title={current.title} back={back} />;
 
+  const fullWidth = current.name === 'tabs' && current.tab === 'Home';
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar style={darkMode ? "light" : "dark"} />
-      <View style={styles.app}>{content}</View>
-      {current.name === 'tabs' && <BottomTabs active={current.tab} onSelect={setTab} />}
+      {isWeb && <WebNavigation current={current} onTab={setTab} onCategory={(screen) => setStack([{ name: 'tabs', tab: 'Home' }, screen])} />}
+      <View key={isWeb ? JSON.stringify(current) : 'native'} style={[styles.app, isWeb && styles.webContent, isWeb && !fullWidth && { maxWidth: current.name === 'groceries' ? 1200 : 1000 }]}>{content}</View>
+      {!isWeb && current.name === 'tabs' && <BottomTabs active={current.tab} onSelect={setTab} />}
     </SafeAreaView>
   );
 }
 
-function createStyles(colors: ThemeColors) {
-  return StyleSheet.create({
+function createStyles(colors: ThemeColors, web?: WebLayout) {
+  const base = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.cream },
   app: { flex: 1, backgroundColor: colors.cream },
+  webHeader: { backgroundColor: colors.surface, borderBottomWidth: 1, borderColor: colors.line },
+  webHeaderInner: { width: '100%', maxWidth: 1200, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16, paddingHorizontal: 18, paddingVertical: 10 },
+  webBrandRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  webMenuButton: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 12, backgroundColor: colors.greenSoft },
+  webDealGrid: { gap: 12 },
+  webDealRow: { flexDirection: 'row', alignItems: 'stretch', gap: 12 },
+  webBrand: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  webBrandTitle: { color: colors.ink, fontSize: 20, fontWeight: '900', letterSpacing: 1 },
+  webLinks: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 3 },
+  webLink: { paddingHorizontal: 11, paddingVertical: 9, borderRadius: 10 },
+  webLinkActive: { backgroundColor: colors.greenSoft },
+  webLinkText: { color: colors.ink, fontSize: 13, fontWeight: '700' },
+  webLinkTextActive: { color: colors.greenDark },
+  webContent: { width: '100%', maxWidth: 1200, alignSelf: 'center', minHeight: 0 },
   page: { padding: 18, paddingBottom: 32, gap: 14 },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 4 },
   logoMark: { width: 42, height: 42, borderRadius: 14, backgroundColor: activeColors.green, alignItems: 'center', justifyContent: 'center' },
@@ -1186,6 +1308,90 @@ function createStyles(colors: ThemeColors) {
   tabLabel: { color: colors.muted, fontSize: 9, fontWeight: '700' },
   tabLabelActive: { color: activeColors.greenDark, fontWeight: '900' },
   });
+  if (!web) return base;
+  const { desktop, phone, gap, padding } = web;
+  // Fixed design tokens per breakpoint. No CSS transform/zoom or device pixel ratio scaling.
+  const font = desktop ? 16 : 15;
+  const sub = phone ? 13 : 14;
+  const readable = { fontSize: font, lineHeight: font + 7 };
+  const secondary = { fontSize: sub, lineHeight: sub + 6 };
+  return { ...base, ...StyleSheet.create({
+    webHeaderInner: { ...base.webHeaderInner, maxWidth: desktop ? 1440 : 1000, paddingHorizontal: padding, paddingVertical: 12, flexDirection: desktop ? 'row' : 'column', alignItems: desktop ? 'center' : 'stretch', gap: 12 },
+    webBrandTitle: { ...base.webBrandTitle, fontSize: 22 },
+    webLinks: { ...base.webLinks, justifyContent: phone ? 'flex-start' : 'space-between', gap: 4 },
+    webLink: { ...base.webLink, minHeight: 44, justifyContent: 'center', alignItems: 'center', paddingHorizontal: phone ? 12 : 14, ...(phone ? { minWidth: '30%', flexGrow: 1 } : {}) },
+    webLinkText: { ...base.webLinkText, fontSize: 15 },
+    webContent: { ...base.webContent, maxWidth: desktop ? 1440 : 1000 },
+    page: { ...base.page, padding, gap, paddingBottom: 40 },
+    headerTitle: { ...base.headerTitle, fontSize: desktop ? 30 : 24 },
+    headerSubtitle: { ...base.headerSubtitle, ...secondary },
+    headerRow: { ...base.headerRow, marginBottom: 8 },
+    hero: { ...base.hero, padding: desktop ? 40 : phone ? 20 : 30, gap: 14, borderRadius: phone ? 22 : 28 },
+    heroEyebrow: { ...base.heroEyebrow, fontSize: 13 },
+    heroTitle: { ...base.heroTitle, fontSize: desktop ? 48 : phone ? 30 : 38, lineHeight: desktop ? 56 : phone ? 36 : 46 },
+    heroText: { ...base.heroText, fontSize: desktop ? 18 : 16, lineHeight: 25 },
+    searchInput: { ...base.searchInput, fontSize: 16, minWidth: 0, height: 50 },
+    searchButton: { ...base.searchButton, height: 48, paddingHorizontal: phone ? 16 : 28 },
+    searchButtonText: { ...base.searchButtonText, fontSize: 16 },
+    sectionTitleRow: { ...base.sectionTitleRow, flexWrap: 'wrap', gap: 8 },
+    sectionTitle: { ...base.sectionTitle, fontSize: desktop ? 25 : 21, flexShrink: 1 },
+    sectionAction: { ...base.sectionAction, fontSize: 13 },
+    categoryGrid: { ...base.categoryGrid, flexWrap: 'nowrap', gap },
+    categoryCard: { ...base.categoryCard, width: 'auto', minWidth: 0, flex: 1, padding: phone ? 10 : 22, minHeight: phone ? 115 : 156 },
+    categoryArt: { ...base.categoryArt, width: phone ? 36 : 48, height: phone ? 36 : 48 },
+    categoryName: { ...base.categoryName, fontSize: phone ? 14 : 19 },
+    categoryHint: { ...base.categoryHint, fontSize: phone ? 12 : 14 },
+    savingsBanner: { ...base.savingsBanner, padding: desktop ? 28 : 18 },
+    savingsMini: { ...base.savingsMini, fontSize: 12 },
+    savingsTitle: { ...base.savingsTitle, fontSize: desktop ? 24 : 19, lineHeight: desktop ? 30 : 25 },
+    savingsText: { ...base.savingsText, ...secondary },
+    webDealGrid: { ...base.webDealGrid, gap },
+    webDealRow: { ...base.webDealRow, gap },
+    dealCard: { ...base.dealCard, width: 'auto', flex: 1, minWidth: 0, minHeight: phone ? 144 : 180, padding: phone ? 16 : 22 },
+    sponsored: { ...base.sponsored, fontSize: 11 },
+    dealTitle: { ...base.dealTitle, fontSize: desktop ? 18 : 16, lineHeight: 24 },
+    dealSource: { ...base.dealSource, ...secondary },
+    dealValidity: { ...base.dealValidity, ...secondary },
+    dealOpen: { ...base.dealOpen, fontSize: 15, marginTop: 12 },
+    disclaimer: { ...base.disclaimer, ...secondary, paddingHorizontal: 0 },
+    bigInput: { ...base.bigInput, fontSize: 16, minWidth: 0 },
+    primaryButton: { ...base.primaryButton, paddingVertical: 12 },
+    primaryButtonText: { ...base.primaryButtonText, fontSize: 15, textAlign: 'center' },
+    pill: { ...base.pill, minHeight: 44, justifyContent: 'center' },
+    pillText: { ...base.pillText, fontSize: 14 },
+    infoCard: { ...base.infoCard, padding: phone ? 14 : 22 },
+    infoText: { ...base.infoText, ...readable },
+    noticeText: { ...base.noticeText, ...secondary },
+    listTitle: { ...base.listTitle, fontSize: 18 },
+    listSub: { ...base.listSub, ...secondary },
+    restaurantCuisine: { ...base.restaurantCuisine, ...secondary },
+    menuName: { ...base.menuName, fontSize: 17 },
+    menuDescription: { ...base.menuDescription, ...secondary },
+    menuPrice: { ...base.menuPrice, fontSize: 15 },
+    groceryName: { ...base.groceryName, fontSize: 17 },
+    groceryQty: { ...base.groceryQty, ...secondary },
+    helperText: { ...base.helperText, ...secondary, marginTop: 0 },
+    sampleTiny: { ...base.sampleTiny, fontSize: 12 },
+    smallAction: { ...base.smallAction, minHeight: 40, justifyContent: 'center' },
+    smallActionText: { ...base.smallActionText, fontSize: 12 },
+    bestBadgeText: { ...base.bestBadgeText, fontSize: 10 },
+    brandBadgeName: { ...base.brandBadgeName, fontSize: 15 },
+    locationLink: { ...base.locationLink, fontSize: 13 },
+    compareHint: { ...base.compareHint, fontSize: 13 },
+    addLabel: { ...base.addLabel, fontSize: 12 },
+    emptyText: { ...base.emptyText, ...readable },
+    detailDescription: { ...base.detailDescription, ...readable },
+    settingHint: { ...base.settingHint, ...secondary },
+    settingLabel: { ...base.settingLabel, fontSize: 15 },
+    profileSub: { ...base.profileSub, ...secondary },
+    offerSub: { ...base.offerSub, ...secondary },
+    shoeName: { ...base.shoeName, fontSize: 17 },
+    shoeMeta: { ...base.shoeMeta, ...secondary },
+    shoeFee: { ...base.shoeFee, ...secondary },
+    breakLabel: { ...base.breakLabel, fontSize: 14 },
+    breakValue: { ...base.breakValue, fontSize: 14 },
+    discountValue: { ...base.discountValue, fontSize: 14 },
+  }) };
 }
 
 function App() {
